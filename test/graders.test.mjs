@@ -90,6 +90,21 @@ test('llm and baseline graders: a verdict is parsed, an unparseable reply FAILS'
   } finally { process.env.PATH = oldPath; await fs.rm(bin, { recursive: true, force: true }); }
 });
 
+test('a source that cannot be read FAILS the grader — it never grades the empty string', async () => {
+  const missing = await grade(g('regex', { pattern: 'anything', source: { source: 'file', path: 'no/such.md' } }), ctx());
+  assert.equal(missing.pass, false);
+  assert.match(missing.detail, /could not be read/);
+  // the dangerous case: `not_contains` against a missing file used to pass vacuously
+  const vacuous = await grade(g('regex', { pattern: 'secret', match: 'not_contains', source: { source: 'file', path: 'no/such.md' } }), ctx());
+  assert.equal(vacuous.pass, false);
+  const escape = await grade(g('regex', { pattern: 'x', source: { source: 'file', path: '../../etc/hosts' } }), ctx());
+  assert.equal(escape.pass, false);
+  assert.match(escape.detail, /escapes the run workspace/);
+  const noBaseline = await grade(g('baseline', { criteria: 'x', baseline_file: 'nope.md' }), ctx());
+  assert.equal(noBaseline.pass, false);
+  assert.match(noBaseline.detail, /baseline_file/);
+});
+
 test('unknown grader type fails loudly; gradeAll scores the set', async () => {
   const bad = await grade(g('unknown', {}), ctx());
   assert.equal(bad.pass, false);

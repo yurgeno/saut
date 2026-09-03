@@ -61,9 +61,12 @@ async function sourceText(g: Grader, ctx: GradeContext): Promise<string> {
     return parts.join('\n\n');
   }
   if (typeof src === 'object' && src && (src as any).source === 'file') {
-    const p = path.resolve(ctx.ws, String((src as any).path ?? ''));
-    if (!p.startsWith(ctx.ws)) return '';
-    try { return await readText(p); } catch { return ''; }
+    const rel = String((src as any).path ?? '');
+    const p = path.resolve(ctx.ws, rel);
+    // A source that cannot be read must FAIL the grader, not silently grade the empty
+    // string — a `not_contains` check would otherwise pass against nothing at all.
+    if (!p.startsWith(ctx.ws + path.sep) && p !== ctx.ws) throw new Error(`source path "${rel}" escapes the run workspace`);
+    try { return await readText(p); } catch (e) { throw new Error(`source file "${rel}" could not be read: ${(e as Error).message}`); }
   }
   return ctx.trace.finalText;
 }
@@ -125,7 +128,7 @@ export async function grade(g: Grader, ctx: GradeContext): Promise<GraderVerdict
       if (g.type === 'baseline') {
         const bf = String(g.fm.baseline_file ?? '');
         const bp = path.resolve(path.dirname(g.file), bf);
-        const baseline = await readText(bp).catch(() => '');
+        const baseline = await readText(bp).catch((e: Error) => { throw new Error(`baseline_file "${bf}" could not be read: ${e.message}`); });
         material = `## BASELINE (the reference)\n${baseline.slice(0, 20000)}\n\n## CANDIDATE (this run)\n${material.slice(0, 20000)}`;
       }
       return await judge(g, criteria, material, ctx);
