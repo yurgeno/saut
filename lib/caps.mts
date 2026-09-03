@@ -15,8 +15,11 @@ const REQUIRED: (keyof HarnessCaps)[] = [
 
 let cache: Map<string, HarnessCaps> | null = null;
 
+// A COPY per call: callers (the TAUT adapter) overlay engine facts onto these records, and
+// a mutation of the module cache would silently rewrite the registry for every later call in
+// the same process — one TAUT pack corrupting the matrix of the next plain skill.
 export async function loadHarnesses(): Promise<Map<string, HarnessCaps>> {
-  if (cache) return cache;
+  if (cache) return new Map([...cache].map(([k, v]) => [k, structuredClone(v)]));
   const m = new Map<string, HarnessCaps>();
   for (const f of (await fs.readdir(DIR)).filter((x) => x.endsWith('.json')).sort()) {
     const h = JSON.parse(await fs.readFile(path.join(DIR, f), 'utf8')) as HarnessCaps;
@@ -25,7 +28,7 @@ export async function loadHarnesses(): Promise<Map<string, HarnessCaps>> {
     m.set(h.id, h);
   }
   cache = m;
-  return m;
+  return new Map([...m].map(([k, v]) => [k, structuredClone(v)]));
 }
 
 export async function harness(id: string): Promise<HarnessCaps> {

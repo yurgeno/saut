@@ -19,7 +19,9 @@ test.before(async () => {
 });
 test.after(async () => { await studio.close(); await fs.rm(root, { recursive: true, force: true }); });
 
-const get = (p, init) => fetch(base + p, init);
+// every /api route requires the token now — the page has it, nothing else does
+const get = (p, init = {}) => fetch(base + p, { ...init, headers: { 'x-saut-token': studio.token, ...(init.headers ?? {}) } });
+const getNoToken = (p) => fetch(base + p);
 const post = (p, body, headers = {}) => fetch(base + p, {
   method: 'POST', headers: { 'content-type': 'application/json', 'x-saut-token': studio.token, ...headers }, body: JSON.stringify(body),
 });
@@ -35,9 +37,10 @@ test('serves the page with the session token, and the token is not guessable', a
 });
 
 // fetch() refuses to set Host (a forbidden header), so the rebinding guard is probed raw.
-function rawGet(pathname, host) {
+function rawGet(pathname, host, token) {
   return new Promise((resolve, reject) => {
-    const req = http.request({ host: '127.0.0.1', port: studio.port, path: pathname, headers: { host } }, (res) => {
+    const headers = { host, ...(token ? { 'x-saut-token': token } : {}) };
+    const req = http.request({ host: '127.0.0.1', port: studio.port, path: pathname, headers }, (res) => {
       res.resume(); resolve(res.statusCode);
     });
     req.on('error', reject); req.end();
@@ -45,16 +48,46 @@ function rawGet(pathname, host) {
 }
 
 test('security contour: bad Host, missing token, foreign Origin are all refused', async () => {
-  assert.equal(await rawGet('/api/context', 'evil.test'), 403, 'DNS-rebinding guard');
-  assert.equal(await rawGet('/api/context', `127.0.0.1:${studio.port}`), 200, 'the loopback origin is served');
+  assert.equal(await rawGet('/api/context', 'evil.test', studio.token), 403, 'DNS-rebinding guard: a foreign Host is refused even WITH the token');
+  assert.equal(await rawGet('/api/context', `127.0.0.1:${studio.port}`, studio.token), 200, 'the loopback origin is served');
   assert.equal((await fetch(base + '/api/save', { method: 'POST', body: '{}' })).status, 403, 'POST without the token');
   const bad = await fetch(base + '/api/save', {
     method: 'POST', headers: { 'content-type': 'application/json', 'x-saut-token': 'deadbeef' }, body: '{}',
   });
   assert.equal(bad.status, 403, 'POST with a wrong token');
   assert.equal((await post('/api/save', {}, { origin: 'http://evil.test' })).status, 403, 'foreign Origin');
-  assert.equal((await get(`/api/test/x/events?token=nope`)).status, 403, 'SSE without the token');
+  assert.equal((await getNoToken(`/api/test/x/events?token=nope`)).status, 403, 'SSE without the token');
   assert.equal((await get('/api/context')).headers.get('access-control-allow-origin'), null, 'no CORS headers are ever sent');
+  // READS carry artifact contents: same-origin policy stops a foreign page, not another
+  // local process scanning loopback ports, so every route needs the token
+  for (const route of ['/api/context', `/api/artifact?path=${encodeURIComponent(path.join(root, 'skills', 'fx-clean', 'SKILL.md'))}`]) {
+    const r = await getNoToken(route);
+    assert.equal(r.status, 403, route);
+    assert.ok(!(await r.text()).includes('fx-clean'), 'nothing leaks in the refusal body');
+  }
+});
+
+test('the page cannot be framed and declares a restrictive policy', async () => {
+  const r = await getNoToken('/');
+  assert.equal(r.status, 200, 'the page itself needs no token — it carries one');
+  assert.equal(r.headers.get('x-frame-options'), 'DENY');
+  assert.match(r.headers.get('content-security-policy'), /frame-ancestors 'none'/);
+  assert.equal(r.headers.get('referrer-policy'), 'no-referrer');
+});
+
+test('containment resolves symlinks: a link out of the root is refused for read and write', async () => {
+  const outside = path.join(os.tmpdir(), `saut-outside-${process.pid}.md`);
+  await fs.writeFile(outside, '---\nname: outside\ndescription: secret\n---\nOUTSIDE\n');
+  const link = path.join(root, 'agents', 'link.md');
+  await fs.symlink(outside, link);
+  try {
+    const read = await get('/api/artifact?path=' + encodeURIComponent(link));
+    assert.equal(read.status, 400, 'reading through a symlink out of the root is refused');
+    assert.match((await read.json()).error, /outside the studio root/);
+    const write = await post('/api/save', { kind: 'agent', name: 'link', path: link, frontmatter: { name: 'link', description: 'x' }, body: 'PWNED' });
+    assert.equal(write.status, 400, 'writing through it is refused too');
+    assert.equal(await fs.readFile(outside, 'utf8'), '---\nname: outside\ndescription: secret\n---\nOUTSIDE\n', 'the target file is untouched');
+  } finally { await fs.rm(link, { force: true }); await fs.rm(outside, { force: true }); }
 });
 
 test('GET /api/context: artifacts, harness registry with semantics, tool registry', async () => {
@@ -164,9 +197,10 @@ test('the token is compared in constant time and finished runs are evicted', asy
   newest.body.cancel();
 });
 
-test('unknown routes 404 and a broken payload never takes the server down', async () => {
+test('unknown routes 404 and a malformed body is a 400, never a 500', async () => {
   assert.equal((await get('/api/nope')).status, 404);
   const r = await fetch(base + '/api/save', { method: 'POST', headers: { 'x-saut-token': studio.token }, body: 'not json' });
-  assert.equal(r.status, 500);
+  assert.equal(r.status, 400, 'a client sending bad JSON is a client error');
+  assert.match((await r.json()).error, /malformed JSON body/);
   assert.equal((await get('/api/context')).status, 200, 'still serving');
 });

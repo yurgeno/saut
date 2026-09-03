@@ -15,7 +15,7 @@ import { runBench } from './bench/bench.mts';
 import { startStudio } from './studio/server.mts';
 import type { BenchResult } from './bench/types.mts';
 import type { AgentArtifact, Artifact, Budgets, CostLine, Diagnostic, HarnessCaps, ToolRegistry } from './types.mts';
-import { c, count, exists, isDir, readText, rel } from './util.mts';
+import { c, count, exists, fail, isDir, readText, rel } from './util.mts';
 
 export const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 export const VERSION: string = JSON.parse(await fs.readFile(path.join(ROOT, 'package.json'), 'utf8')).version;
@@ -56,7 +56,7 @@ export interface Opts {
 async function selectHarnesses(opts: Opts): Promise<HarnessCaps[]> {
   const all = await loadHarnesses();
   if (!opts.harness?.length) return [...all.values()];
-  return opts.harness.map((id) => all.get(id) ?? (() => { throw new Error(`unknown harness "${id}" (known: ${[...all.keys()].join(', ')})`); })());
+  return opts.harness.map((id) => all.get(id) ?? fail(`unknown harness "${id}" (known: ${[...all.keys()].join(', ')})`));
 }
 
 async function budgetsFor(targets: string[], opts: Opts): Promise<Budgets> {
@@ -129,10 +129,14 @@ export async function runLint(targets: string[], opts: Opts): Promise<{ diagnost
 
 export async function cmdLint(opts: Opts): Promise<number> {
   const { diagnostics, artifacts, harnesses, taut, note, scanNote, scanners } = await runLint(opts._, opts);
+  // one verdict for every output format — a CI job that adds --json must not stop catching
+  // "the target matched nothing"
+  const exit = !artifacts.length ? 1
+    : diagnostics.some((x) => x.severity === 'high') || (opts.strict && diagnostics.some((x) => x.severity === 'medium')) ? 1 : 0;
   if (opts.sarif) { process.stdout.write(JSON.stringify(toSarif(diagnostics, VERSION), null, 2) + '\n'); }
   else if (opts.json) { process.stdout.write(JSON.stringify({ version: VERSION, artifacts: artifacts.map((a) => ({ kind: a.kind, name: a.name, path: a.path })), diagnostics }, null, 2) + '\n'); }
   else {
-    if (!artifacts.length) { process.stdout.write('no skills or agents found\n'); return 1; }
+    if (!artifacts.length) process.stdout.write('no skills or agents found\n');
     if (taut) process.stdout.write(c.dim(`TAUT pack ${rel(taut.packRoot)} · engine ${rel(taut.engine)}${taut.engineCommit ? ` @${taut.engineCommit}` : ''}${taut.project ? ` · deployment ${taut.project.name}` : ''} — engine-parsed frontmatter, wiring checked against the catalog\n`));
     else if (note) process.stdout.write(c.dim(note + '\n'));
     if (scanners?.length) process.stdout.write(c.dim(`content scan: ${scanners.join(', ')}\n`));
@@ -152,11 +156,9 @@ export async function cmdLint(opts: Opts): Promise<number> {
     }
     const hi = diagnostics.filter((x) => x.severity === 'high').length;
     const med = diagnostics.filter((x) => x.severity === 'medium').length;
-    process.stdout.write(`\n${count(artifacts.length, 'artifact')}, ${count(diagnostics.length, 'finding')} (${hi} high, ${med} medium)\n`);
+    if (artifacts.length) process.stdout.write(`\n${count(artifacts.length, 'artifact')}, ${count(diagnostics.length, 'finding')} (${hi} high, ${med} medium)\n`);
   }
-  const hi = diagnostics.some((x) => x.severity === 'high');
-  const med = diagnostics.some((x) => x.severity === 'medium');
-  return hi || (opts.strict && med) ? 1 : 0;
+  return exit;
 }
 
 // ---- cost ---------------------------------------------------------------------------
@@ -256,11 +258,15 @@ export async function cmdHarnesses(opts: Opts): Promise<number> {
 
 export async function cmdTools(opts: Opts): Promise<number> {
   const reg = await buildRegistry({ catalog: opts.catalog, live: opts.live, start: path.resolve(opts._[0] ?? '.') });
-  if (opts.json) { process.stdout.write(JSON.stringify(reg, null, 2) + '\n'); return 0; }
+  // a CI job running `saut tools --live` to prove the catalog is wired must FAIL when a
+  // server did not answer — the failure used to hide inside a `source` string
+  const failed = reg.servers.filter((s) => s.liveFailed);
+  if (opts.json) { process.stdout.write(JSON.stringify(reg, null, 2) + '\n'); return failed.length ? 1 : 0; }
   for (const [h, tools] of Object.entries(reg.builtin)) if (tools.length) process.stdout.write(`${c.bold(h)}: ${tools.join(' ')}\n`);
   if (!reg.servers.length) process.stdout.write(c.dim('no MCP catalog found (pass --catalog <file>)\n'));
-  for (const s of reg.servers) process.stdout.write(`${c.bold('mcp ' + s.serverKey)}${s.role ? c.dim(` role=${s.role}`) : ''} ${c.dim(`[${s.source}]`)}\n  ${s.tools.length ? s.tools.join(' ') : c.dim('(no tool list — use --live)')}\n`);
-  return 0;
+  for (const s of reg.servers) process.stdout.write(`${s.liveFailed ? c.red('mcp ' + s.serverKey) : c.bold('mcp ' + s.serverKey)}${s.role ? c.dim(` role=${s.role}`) : ''} ${c.dim(`[${s.source}]`)}\n  ${s.tools.length ? s.tools.join(' ') : c.dim('(no tool list — use --live)')}\n`);
+  if (failed.length) process.stderr.write(c.red(`${count(failed.length, 'server')} did not answer tools/list\n`));
+  return failed.length ? 1 : 0;
 }
 
 // ---- test bench (L1 compile · L2 trigger · L3 obedience) ---------------------------------

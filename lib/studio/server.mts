@@ -12,7 +12,7 @@ import { createServer } from 'node:http';
 import { execFile } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
-import { readFileSync } from 'node:fs';
+import fsSync, { readFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import type { Server } from 'node:http';
@@ -37,6 +37,7 @@ const renderPage = (token: string): string => PAGE.replace('%%TOKEN%%', token);
 
 const NAME = /^[a-z0-9][a-z0-9-]*$/;                       // skill/agent id (spec shape)
 const MAX_JOBS = 32;                                       // completed bench runs kept for replay
+const VALIDATE_TIMEOUT_MS = 30 * 60 * 1000;                // a pack script that hangs must not wedge the server
 
 // Constant-time compare so a token cannot be recovered byte by byte from response timing.
 // Lengths differ → reject without comparing (the length is not a secret).
@@ -81,7 +82,7 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
   // compiled bytes. The same functions `saut lint|cost|passport` call.
   async function passport(file: string) {
     const abs = path.resolve(file);
-    if (!contained(abs)) throw new Error('path outside the studio root');
+    if (!(await contained(abs))) throw new Error('path outside the studio root');
     const { artifacts, harnesses, registry, agentsByName, taut } = await load([abs], opts);
     const a = artifacts[0];
     if (!a) throw new Error(`no skill or agent at ${file}`);
@@ -102,7 +103,25 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
     };
   }
 
-  const contained = (abs: string): boolean => abs === root || abs.startsWith(root + path.sep);
+  // Containment resolves SYMLINKS: path.resolve is lexical, so `<root>/agents/link.md`
+  // pointing at /etc/hosts passes a string test while reading (or writing) outside the root.
+  // The nearest existing ancestor is realpath'd — the target itself may not exist yet.
+  async function contained(abs: string): Promise<boolean> {
+    let probe = abs;
+    for (let i = 0; i < 64; i++) {
+      try {
+        const real = await fs.realpath(probe);
+        const rest = path.relative(probe, abs);
+        const resolved = rest ? path.join(real, rest) : real;
+        const r = path.relative(realRoot, resolved);
+        return resolved === realRoot || (!!r && !r.startsWith('..') && !path.isAbsolute(r));
+      } catch { /* does not exist yet — try the parent */ }
+      const up = path.dirname(probe);
+      if (up === probe) return false;
+      probe = up;
+    }
+    return false;
+  }
 
   // Where a NEW artifact goes: a TAUT pack's shared skills/ (or <project>/skills/), else
   // <root>/skills/<name>/SKILL.md — the layout the spec and every harness discover.
@@ -119,12 +138,16 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
     const fm = payload.frontmatter && typeof payload.frontmatter === 'object' ? payload.frontmatter : null;
     if (!fm) throw new Error('frontmatter is required');
     const file = payload.path ? path.resolve(String(payload.path)) : await targetFor(kind, name, payload.project ?? null);
-    if (!contained(file)) throw new Error('path outside the studio root');
+    if (!(await contained(file))) throw new Error('path outside the studio root');
     if (path.basename(file) !== 'SKILL.md' && !file.endsWith('.md')) throw new Error('refusing to write a non-markdown file');
     const created = !(await exists(file));
     const text = emitFrontmatter(fm) + (body.startsWith('\n') ? body : '\n' + body);
     await fs.mkdir(path.dirname(file), { recursive: true });
-    await fs.writeFile(file, text.endsWith('\n') ? text : text + '\n');
+    // O_NOFOLLOW on the final component: a symlink planted at the target must not redirect
+    // the write (the containment check above already resolved the directory chain).
+    const flags = created ? 'wx' : fsSync.constants.O_WRONLY | fsSync.constants.O_TRUNC | fsSync.constants.O_NOFOLLOW;
+    const h = await fs.open(file, flags as never);
+    try { await h.writeFile(text.endsWith('\n') ? text : text + '\n'); } finally { await h.close(); }
     return { path: file, created };
   }
 
@@ -136,7 +159,7 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
     const env = { ...process.env, ...(taut ? { TAUT_ENGINE: taut.engine, SAUT: path.dirname(HERE).replace(/\/lib$/, '') } : {}) } as Record<string, string>;
     if (script && (await exists(script))) {
       try {
-        const r = await run('bash', [script], { cwd: taut!.packRoot, env, maxBuffer: 16 * 1024 * 1024 });
+        const r = await run(script, [], { cwd: taut!.packRoot, env, maxBuffer: 16 * 1024 * 1024, timeout: VALIDATE_TIMEOUT_MS, killSignal: 'SIGKILL', shell: false });
         return { ok: true, command: 'tools/validate-pack.sh', output: r.stdout.slice(-20000) };
       } catch (e) {
         const err = e as { stdout?: string; stderr?: string };
@@ -145,7 +168,7 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
     }
     const cli = path.join(path.dirname(HERE).replace(/\/lib$/, ''), 'saut.mjs');
     try {
-      const r = await run('node', [cli, 'lint', root, '--strict'], { env, maxBuffer: 16 * 1024 * 1024 });
+      const r = await run(process.execPath, [cli, 'lint', root, '--strict'], { env, maxBuffer: 16 * 1024 * 1024, timeout: VALIDATE_TIMEOUT_MS, killSignal: 'SIGKILL' });
       return { ok: true, command: 'saut lint --strict', output: r.stdout.slice(-20000) };
     } catch (e) {
       const err = e as { stdout?: string; stderr?: string };
@@ -155,7 +178,7 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
 
   async function startBench(payload: any): Promise<string> {
     const file = path.resolve(String(payload.path ?? ''));
-    if (!contained(file)) throw new Error('path outside the studio root');
+    if (!(await contained(file))) throw new Error('path outside the studio root');
     const { artifacts, harnesses, taut } = await load([file], opts);
     const a = artifacts[0];
     if (!a) throw new Error('no artifact at that path');
@@ -186,6 +209,7 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
     return id;
   }
 
+  const realRoot = await fs.realpath(root).catch(() => root);
   const server = createServer(async (req, res) => {
     const send = (code: number, body: unknown, type = 'application/json') => {
       res.writeHead(code, { 'content-type': type, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
@@ -196,7 +220,23 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
       const url = new URL(req.url ?? '/', 'http://127.0.0.1');
       const { pathname } = url;
 
-      if (req.method === 'GET' && pathname === '/') return send(200, renderPage(token), 'text/html; charset=utf-8');
+      if (req.method === 'GET' && pathname === '/') {
+        // A mutating loopback UI must not be frameable: the token lives INSIDE the page, so
+        // CSRF headers do not protect against a foreign page iframing it and stealing clicks.
+        res.writeHead(200, {
+          'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store',
+          'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY',
+          'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+          'referrer-policy': 'no-referrer',
+        });
+        return res.end(renderPage(token));
+      }
+      // READS carry content (artifact bodies, pack layout) — the same-origin policy stops a
+      // foreign PAGE, not another local process scanning loopback ports. Every /api route
+      // requires the token; the page has it, nothing else does.
+      if (pathname.startsWith('/api/') && !pathname.startsWith('/api/test/')
+        && !tokenOk(req.headers['x-saut-token'] ?? url.searchParams.get('token'), token))
+        return send(403, { error: 'bad or missing token' });
       if (req.method === 'GET' && pathname === '/api/context') return send(200, await context());
       if (req.method === 'GET' && pathname === '/api/artifact') {
         const p = url.searchParams.get('path') ?? '';
@@ -224,10 +264,18 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
         if (!tokenOk(req.headers['x-saut-token'], token)) return send(403, { error: 'bad or missing token' });
         const origin = req.headers.origin;
         if (origin && origin !== `http://127.0.0.1:${boundPort}` && origin !== `http://localhost:${boundPort}`) return send(403, { error: 'bad origin' });
-        let body = '';
-        for await (const chunk of req) { body += chunk; if (body.length > 4 * 1024 * 1024) return send(413, { error: 'request body too large' }); }
-        const payload = body ? JSON.parse(body) : {};
+        const chunks: Buffer[] = [];
+        let size = 0;
+        for await (const chunk of req) {
+          size += (chunk as Buffer).length;
+          if (size > 4 * 1024 * 1024) { req.destroy(); return send(413, { error: 'request body too large' }); }
+          chunks.push(chunk as Buffer);
+        }
         try {
+          const raw = Buffer.concat(chunks).toString('utf8');
+          let payload: any;
+          try { payload = raw ? JSON.parse(raw) : {}; }
+          catch (e) { return send(400, { error: `malformed JSON body: ${(e as Error).message}` }); }
           if (pathname === '/api/emit') return send(200, { text: emitFrontmatter(payload.frontmatter ?? {}) });
           if (pathname === '/api/save') { const r = await save(payload); return send(200, { ...r, passport: await passport(r.path) }); }
           if (pathname === '/api/test') return send(200, { id: await startBench(payload) });

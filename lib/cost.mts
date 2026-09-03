@@ -8,7 +8,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Artifact, Budgets, CostLine, HarnessCaps } from './types.mts';
-import { exists, readText } from './util.mts';
+import { exists, MAX_READ_BYTES, readText } from './util.mts';
 
 // Heuristic tokenizer: words ≈ 1 token per ~4.5 letters (min 1), digits ≈ 1 per 3,
 // every punctuation/symbol char ≈ 1, whitespace free. On English markdown this lands
@@ -51,14 +51,29 @@ export function listingText(a: Artifact, h: HarnessCaps | null): string {
 
 // Files the body references by relative path (references/, scripts/, runbooks…) that a
 // harness would read on invoke. Conservative: only paths that exist next to the artifact.
+// The scan is bounded twice over: only the first REF_SCAN_BYTES of a body are searched, and
+// the pattern matches ONE bounded path token per position (no nested quantifier), so a large
+// or adversarial body cannot turn this into minutes of CPU.
+const REF_SCAN_BYTES = 256 * 1024;
+const REF_PATH = /(?:^|[\s"'`(\[])((?:[A-Za-z0-9_.-]{1,64}\/){1,8}[A-Za-z0-9_.-]{1,64}\.(?:md|txt|json|yaml|yml|sh|py|mjs|js|ts))(?=$|[\s"'`)\].,;:])/gm;
+
 export async function referencedFiles(a: Artifact): Promise<string[]> {
   const base = a.kind === 'skill' ? a.dir : path.dirname(a.path);
   const cands = new Set<string>();
-  for (const m of a.body.matchAll(/(?:\.\/|\b)((?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.-]+\.(?:md|txt|json|yaml|yml|sh|py|mjs|js|ts))\b/g)) cands.add(m[1]);
+  for (const m of a.body.slice(0, REF_SCAN_BYTES).matchAll(REF_PATH)) cands.add(m[1]);
   const out: string[] = [];
   for (const c of cands) {
     const p = path.resolve(base, c);
-    if (p.startsWith(base) && (await exists(p)) && !(await fs.stat(p)).isDirectory()) out.push(p);
+    // Containment by RELATIVE path, not by string prefix: `<base>-secrets/creds.json`
+    // starts with `<base>` as a string but is a different directory. Without this a crafted
+    // body reads a sibling file — and under --exact its contents would be POSTed to the
+    // token-counting API.
+    const r = path.relative(base, p);
+    if (!r || r.startsWith('..') || path.isAbsolute(r)) continue;
+    if (!(await exists(p))) continue;
+    const st = await fs.stat(p);
+    if (!st.isFile() || st.size > MAX_READ_BYTES) continue;
+    out.push(p);
   }
   return out;
 }

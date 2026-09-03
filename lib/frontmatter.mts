@@ -49,7 +49,7 @@ function inlineValue(v: string, diag: (m: string) => void): unknown {
   if (t.startsWith('{')) {
     if (!t.endsWith('}')) { diag('unterminated inline map'); return t; }
     const inner = t.slice(1, -1).trim();
-    const o: Record<string, unknown> = {};
+    const o: Record<string, unknown> = Object.create(null);
     if (!inner) return o;
     for (const kv of splitInline(inner)) {
       const i = kv.indexOf(':');
@@ -89,9 +89,12 @@ export function parseFrontmatter(text: string, file: string): Frontmatter {
     lines.push({ n: i + 1, indent, text: raw.slice(indent) });
   }
 
-  const topLines: Record<string, number> = {};
+  // Null-prototype maps everywhere a KEY comes from the file: `__proto__`, `constructor`
+  // and `prototype` are ordinary strings in YAML, and on a normal object they would either
+  // crash (`all['__proto__'] ??=` never assigns) or set the prototype of the parsed data.
+  const topLines: Record<string, number> = Object.create(null);
   const duplicates: string[] = [];
-  const all: Record<string, unknown[]> = {};
+  const all: Record<string, unknown[]> = Object.create(null);
 
   // Read a folded/literal block starting after line index i (body lines more indented than `indent`).
   function block(i: number, indent: number, style: string): [string, number] {
@@ -125,7 +128,7 @@ export function parseFrontmatter(text: string, file: string): Frontmatter {
 
   // Parse a mapping whose keys sit at `indent`; returns [value, next index].
   function parseMap(i: number, indent: number, top: boolean): [Record<string, unknown>, number] {
-    const o: Record<string, unknown> = {};
+    const o: Record<string, unknown> = Object.create(null);
     while (i < lines.length && lines[i].indent === indent) {
       const L = lines[i];
       const m = L.text.match(KEY);
@@ -137,7 +140,7 @@ export function parseFrontmatter(text: string, file: string): Frontmatter {
       }
       const key = m[1].replace(/^["']|["']$/g, '');
       const rest = m[2] ?? '';
-      if (key in o) duplicates.push(key);
+      if (Object.hasOwn(o, key)) duplicates.push(key);
       if (top && !(key in topLines)) topLines[key] = L.n;
       const record = (v: unknown) => { if (top) (all[key] ??= []).push(v); };
       const next = lines[i + 1];
@@ -187,7 +190,9 @@ export function parseFrontmatter(text: string, file: string): Frontmatter {
     diagnostics.push({ code: 'duplicate-key', severity: 'info', message: `key "${d}" appears more than once (capability-marker branches? — the TAUT adapter parses those with the engine)`, path: file, line: topLines[d] });
   // first occurrence wins for display fields (a TAUT `on` branch is written first)
   for (const k of new Set(duplicates)) if (all[k]?.length) data[k] = all[k][0];
-  return { data, all, diagnostics, lines: topLines, duplicates: [...new Set(duplicates)], bodyOffset: end + 2 };
+  // hand back plain objects (a null-prototype map breaks JSON round-trips downstream)
+  const plain = <T,>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
+  return { data: plain(data), all: plain(all), diagnostics, lines: plain(topLines), duplicates: [...new Set(duplicates)], bodyOffset: end + 2 };
 }
 
 export function bodyOf(text: string, fm: Frontmatter): string {

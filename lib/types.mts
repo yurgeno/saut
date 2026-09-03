@@ -106,6 +106,7 @@ export interface ToolCatalogServer {
   role?: string;
   tools: string[];                      // fully qualified: mcp__<serverKey>__<tool>
   source: string;                       // where the list came from (catalog file / live)
+  liveFailed?: boolean;                 // --live: this server did not answer tools/list
 }
 
 export interface ToolRegistry {
