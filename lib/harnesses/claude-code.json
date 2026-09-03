@@ -1,0 +1,132 @@
+{
+  "id": "claude-code",
+  "title": "Claude Code",
+  "docs": [
+    "https://code.claude.com/docs/en/skills",
+    "https://code.claude.com/docs/en/permissions",
+    "https://code.claude.com/docs/en/tools-reference",
+    "https://code.claude.com/docs/en/sub-agents",
+    "https://code.claude.com/docs/en/context-window",
+    "tools list snapshot: https://code.claude.com/docs/en/tools-reference (2026-09-03)"
+  ],
+  "skillsDirs": [
+    ".claude/skills"
+  ],
+  "agentsDir": ".claude/agents",
+  "agentFormat": "md-frontmatter",
+  "builtinTools": [
+    "Agent",
+    "Artifact",
+    "AskUserQuestion",
+    "Bash",
+    "CronCreate",
+    "CronDelete",
+    "CronList",
+    "Edit",
+    "EndConversation",
+    "EnterPlanMode",
+    "EnterWorktree",
+    "ExitPlanMode",
+    "ExitWorktree",
+    "Glob",
+    "Grep",
+    "ListAgents",
+    "ListMcpResourcesTool",
+    "LSP",
+    "Monitor",
+    "NotebookEdit",
+    "PowerShell",
+    "PushNotification",
+    "Read",
+    "ReadMcpResourceTool",
+    "RemoteTrigger",
+    "ReportFindings",
+    "ScheduleWakeup",
+    "SendFeedback",
+    "SendMessage",
+    "SendUserFile",
+    "ShareOnboardingGuide",
+    "Skill",
+    "TaskCreate",
+    "TaskGet",
+    "TaskList",
+    "TaskOutput",
+    "TaskStop",
+    "TaskUpdate",
+    "TodoWrite",
+    "ToolSearch",
+    "WaitForMcpServers",
+    "WebFetch",
+    "WebSearch",
+    "Workflow",
+    "Write"
+  ],
+  "legacyTools": [
+    "MultiEdit",
+    "LS",
+    "NotebookRead",
+    "BashOutput",
+    "KillShell",
+    "SlashCommand",
+    "TodoRead",
+    "Task",
+    "WebBrowser"
+  ],
+  "frontmatterFields": [
+    "name",
+    "description",
+    "when_to_use",
+    "argument-hint",
+    "arguments",
+    "allowed-tools",
+    "disallowed-tools",
+    "disable-model-invocation",
+    "user-invocable",
+    "model",
+    "effort",
+    "context",
+    "agent",
+    "background",
+    "shell",
+    "hooks",
+    "paths",
+    "metadata",
+    "license",
+    "compatibility"
+  ],
+  "toolAllowlist": "grant",
+  "agentAllowlist": "restrict",
+  "denyMechanism": "skill `disallowed-tools` (turn-scoped) or settings `permissions.deny` (bare tool name removes the tool; `Tool(spec)` blocks matching calls); `allowed-tools` only pre-approves",
+  "toolScopedSyntax": true,
+  "modelPin": "enforced",
+  "promptGate": "blocking",
+  "mcpToolNaming": "mcp__{server}__{tool}",
+  "listing": {
+    "budget": "skill listing ≤ 1 % of the context window (skillListingBudgetFraction)",
+    "descCap": 1536,
+    "note": "name + description of every available skill enters the system prompt each session; the body loads on invoke (and stays after compaction, ≤ 5k/skill, 25k total)"
+  },
+  "runner": {
+    "cmd": [
+      "claude",
+      "-p",
+      "{prompt}",
+      "--output-format",
+      "stream-json",
+      "--verbose",
+      "--permission-mode",
+      "dontAsk"
+    ],
+    "trace": "stream-json"
+  },
+  "degradations": [
+    {
+      "id": "CC-GRANT",
+      "text": "`allowed-tools` PRE-APPROVES tools for the skill's turn — it is a grant, not a restriction; a read-only promise needs `disallowed-tools` or a settings deny rule"
+    },
+    {
+      "id": "CC-MCP-PAREN",
+      "text": "`mcp__*` rules with parentheses are skipped when loaded from settings files (use --disallowedTools for parameter matches)"
+    }
+  ]
+}

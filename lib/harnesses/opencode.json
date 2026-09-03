@@ -1,0 +1,37 @@
+{
+  "id": "opencode",
+  "title": "OpenCode",
+  "docs": [
+    "https://opencode.ai/docs/skills/",
+    "https://opencode.ai/docs/tools/",
+    "https://opencode.ai/docs/agents/",
+    "https://opencode.ai/docs/permissions/"
+  ],
+  "skillsDirs": [".opencode/skills", ".claude/skills", ".agents/skills"],
+  "agentsDir": ".opencode/agents",
+  "agentFormat": "md-frontmatter",
+  "builtinTools": ["bash", "edit", "write", "read", "grep", "glob", "lsp", "apply_patch", "skill", "todowrite", "webfetch", "websearch", "question", "task"],
+  "legacyTools": ["list", "patch", "todoread"],
+  "frontmatterFields": ["name", "description", "license", "compatibility", "metadata"],
+  "toolAllowlist": "prose",
+  "agentAllowlist": "restrict",
+  "denyMechanism": "opencode.json `permission` (bash/edit/webfetch/skill: allow|deny|ask, pattern-based) and per-agent `tools:` map / `permission:` overrides; nothing per skill",
+  "toolScopedSyntax": false,
+  "modelPin": "enforced",
+  "promptGate": "banner",
+  "mcpToolNaming": "{server}_{tool}",
+  "listing": {
+    "budget": "skill names + descriptions are embedded in the `skill` tool description",
+    "descCap": null,
+    "note": "the agent loads a skill via skill({name}); `permission.skill` patterns decide allow/deny/ask"
+  },
+  "runner": {
+    "cmd": ["opencode", "run", "--format", "json", "--dir", "{cwd}", "{prompt}"],
+    "trace": "json"
+  },
+  "degradations": [
+    { "id": "OC-ALLOWLIST-PROSE", "text": "skill `allowed-tools` is informational — OpenCode only honours name/description/license/compatibility/metadata" },
+    { "id": "OC-MCP-NAMING", "text": "MCP tools are advertised as {server}_{tool}, not mcp__{server}__{tool}; allowlist entries written Claude-style never match" },
+    { "id": "OC-NO-PROMPT-GATE", "text": "no blocking prompt-time hook; integrity checks are best-effort banners" }
+  ]
+}

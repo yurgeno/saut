@@ -1,0 +1,4 @@
+{ "servers": {
+  "docs": { "role": "docs", "serverKey": "docs", "command": "node", "args": ["-e", "0"], "tools": ["mcp__docs__lookup", "mcp__docs__query"] },
+  "kb":   { "role": "knowledge", "serverKey": "kb", "command": "node", "args": ["-e", "0"], "tools": ["mcp__kb__read", "mcp__kb__write"] }
+} }

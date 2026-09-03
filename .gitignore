@@ -1,0 +1,7 @@
+.DS_Store
+.test-tmp*/
+node_modules/
+# Local working instructions for agent sessions in this clone — never published.
+/CLAUDE.md
+/CLAUDE.local.md
+/.claude/

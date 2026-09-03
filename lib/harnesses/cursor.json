@@ -1,0 +1,24 @@
+{
+  "id": "cursor",
+  "title": "Cursor",
+  "docs": ["https://cursor.com/docs/skills"],
+  "skillsDirs": [".cursor/skills", ".agents/skills"],
+  "agentsDir": null,
+  "agentFormat": "none",
+  "builtinTools": [],
+  "legacyTools": [],
+  "frontmatterFields": ["name", "description", "license", "compatibility", "metadata"],
+  "toolAllowlist": "prose",
+  "agentAllowlist": "n/a",
+  "denyMechanism": null,
+  "toolScopedSyntax": false,
+  "modelPin": "none",
+  "promptGate": "none",
+  "mcpToolNaming": "{server}_{tool}",
+  "listing": { "budget": "undocumented", "descCap": null, "note": "registry-only entry: no headless runner in SAUT yet" },
+  "runner": null,
+  "degradations": [
+    { "id": "CU-ALLOWLIST-PROSE", "text": "skill `allowed-tools` is informational" },
+    { "id": "CU-NO-RUNNER", "text": "no headless runner — trigger/obedience tests unavailable on this harness" }
+  ]
+}

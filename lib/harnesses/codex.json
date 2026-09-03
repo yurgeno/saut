@@ -1,0 +1,35 @@
+{
+  "id": "codex",
+  "title": "OpenAI Codex CLI",
+  "docs": [
+    "https://developers.openai.com/codex/skills",
+    "https://developers.openai.com/codex/agent-configuration/subagents"
+  ],
+  "skillsDirs": [".agents/skills"],
+  "agentsDir": ".codex/agents",
+  "agentFormat": "toml",
+  "builtinTools": ["shell", "apply_patch", "web_search", "view_image", "update_plan"],
+  "legacyTools": [],
+  "frontmatterFields": ["name", "description", "license", "compatibility", "metadata"],
+  "toolAllowlist": "prose",
+  "agentAllowlist": "dropped",
+  "denyMechanism": "sandbox policy (`--sandbox read-only|workspace-write`) + approval policy in config.toml; no per-skill tool allowlist. `agents/openai.yaml` `policy.allow_implicit_invocation: false` disables implicit invocation",
+  "toolScopedSyntax": false,
+  "modelPin": "enforced",
+  "promptGate": "blocking",
+  "mcpToolNaming": "mcp__{server}__{tool}",
+  "listing": {
+    "budget": "skills list ≤ 2 % of context or 8 000 chars",
+    "descCap": null,
+    "note": "name + description drive implicit matching; the full SKILL.md loads when selected regardless of budget"
+  },
+  "runner": {
+    "cmd": ["codex", "exec", "--json", "--sandbox", "read-only", "--ephemeral", "--skip-git-repo-check", "-C", "{cwd}", "{prompt}"],
+    "trace": "jsonl"
+  },
+  "degradations": [
+    { "id": "CX-ALLOWLIST-PROSE", "text": "skill `allowed-tools` is informational — Codex enforces nothing per skill; only the sandbox/approval policy restricts" },
+    { "id": "CX-AGENT-TOOLS-DROPPED", "text": "a Claude-style agent `tools:` allowlist has no TOML counterpart and is dropped when rendered to .codex/agents/*.toml" },
+    { "id": "CX-MODEL-INVOCATION", "text": "`disable-model-invocation` has no effect; use `agents/openai.yaml` policy.allow_implicit_invocation: false" }
+  ]
+}
