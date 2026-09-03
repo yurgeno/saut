@@ -31,6 +31,28 @@ export async function makeScratchRoot(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'saut-bench-'));
 }
 
+// A harness may keep per-project state OUTSIDE the workspace it was pointed at: Claude Code
+// derives an auto-memory directory from the cwd (~/.claude/projects/<cwd with / as ->). A
+// bench must not leave that behind, so its own directories are removed with the scratch.
+// Guarded twice: the name must be derived from THIS scratch path and contain `saut-bench-`.
+export async function cleanHarnessState(scratchRoot: string): Promise<string[]> {
+  const removed: string[] = [];
+  if (!path.basename(scratchRoot).startsWith('saut-bench-')) return removed;
+  const roots = [path.join(os.homedir(), '.claude', 'projects')];
+  for (const dir of roots) {
+    let entries: string[] = [];
+    try { entries = await fs.readdir(dir); } catch { continue; }
+    for (const e of entries) {
+      if (!e.includes('saut-bench-')) continue;
+      const slug = e.replace(/-/g, '/');
+      const mine = slug.includes(path.basename(scratchRoot).replace(/-/g, '/'));
+      if (!mine) continue;
+      try { await fs.rm(path.join(dir, e), { recursive: true, force: true }); removed.push(path.join(dir, e)); } catch { /* leave it */ }
+    }
+  }
+  return removed;
+}
+
 export async function genericScratch(a: Artifact, harnesses: HarnessCaps[], root: string, siblings: Artifact[]): Promise<Scratch> {
   const ws = path.join(root, 'ws');
   await fs.mkdir(ws, { recursive: true });

@@ -128,13 +128,31 @@ test('L3 denied: a refused call is denial, not violation', async () => {
   assert.ok(!cc.obedience.violations.some((v) => v.includes('curl')));
 });
 
-test('L2 lost: another skill fires instead — fireRate 0 and lostTo names the winner', async () => {
-  const r = await bench('lost', { level: 2, caseFilter: 'implicit' });
+test('an implicit case against a model-invocable skill: lostTo names the winner', async () => {
+  const [invocable] = await discover([path.join(PACK, 'skills', 'fx-writer-auto')]);
+  const bin = await fakeBin('lost', 'fx-writer-auto');
+  const out = await fs.mkdtemp(path.join(os.tmpdir(), 'saut-out-'));
+  const oldPath = process.env.PATH;
+  process.env.PATH = `${bin}${path.delimiter}${oldPath}`;
+  let r;
+  try {
+    r = await runBench({ artifact: invocable, siblings: [], harnesses: runnable, taut: null, level: 2, runs: 1, maxCostUsd: null, landscape: null, caseFilter: 'implicit', outDir: out, keepScratch: false, timeoutMs: 30000, version: 'test' });
+  } finally { process.env.PATH = oldPath; await fs.rm(bin, { recursive: true, force: true }); await fs.rm(out, { recursive: true, force: true }); }
   const cc = r.reports.find((x) => x.harness === 'claude-code');
   assert.equal(cc.trigger.fireRate, 0);
   assert.deepEqual(cc.trigger.lostTo, ['other-a']);
   assert.equal(cc.traces[0].competing, 2, 'the competing-skills caveat is recorded');
   assert.equal(cc.obedience, null, 'L2 stops before obedience');
+});
+
+test('an implicit case is SKIPPED, not paid for, when the skill forbids model invocation', async () => {
+  const r = await bench('fire', { level: 2, caseFilter: 'implicit' });   // fx-clean: disable-model-invocation
+  for (const rep of r.reports.filter((x) => x.available)) {
+    assert.deepEqual(rep.traces, [], 'nothing ran');
+    assert.equal(rep.skipped.length, 1);
+    assert.match(rep.skipped[0].why, /disable-model-invocation/);
+  }
+  assert.equal(r.budget.spentUsd, 0, 'an unwinnable case costs nothing');
 });
 
 test('an unavailable provider is a reported row, never a crash; budget stops the run', async () => {

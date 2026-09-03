@@ -68,6 +68,9 @@ saut lint . --strict                     # exit 1 on medium findings too
 saut cost .                              # estimates (no key, no network)
 saut cost . --exact                      # Claude token-counting API (ANTHROPIC_API_KEY)
 saut cost . --budget budgets.json        # or a saut.json {"budgets": {...}} up the tree
+saut cost . --workspace ~/ws             # adds USED: invocations from that workspace's telemetry
+
+saut lint . --scan                       # + an installed content scanner (skillspector, snyk, …)
 
 saut tools . --live                      # spawn catalog MCP servers, ask tools/list
 ```
@@ -92,6 +95,10 @@ budget · 2 usage error.
 | always-on | `name` + `description` (the listing entry) | every session, whether or not the skill fires |
 | on-invoke | the body | each time the skill fires |
 | transitive | subagents the skill wires (`metadata.taut.agents`, `agent:`), files the body references by path | on invoke, in the subagent's or the reader's context |
+| used | invocations recorded by a compiled TAUT workspace's local telemetry (`--workspace`) | — |
+
+Cost and usage together are the point: a skill that costs its always-on tokens in every
+session and was invoked zero times in six days is the one to compress or drop.
 
 Default numbers are **estimates** (a deterministic heuristic, labelled as such — like
 `claude plugin details`). `--exact` counts through the Claude token-counting API. Budgets
@@ -159,6 +166,9 @@ matrix skill dev-review · taut · L3
   codex        trigger 100% · control clean · obedience inside allowlist [prose]
 ```
 
+L4 adds scenario graders in the `plugin eval` layout (`regex`, `tool_used`, `tool_order`,
+`file_exists`, `llm`, `baseline`), and imports an agentskills `evals.json` suite as cases.
+
 Two states carry most of the value: **`lost to <skill>`** (the implicit prompt fired a
 *different* skill — the description lost a routing contest) and **outside allowlist** (a call
 ran that the declaration never covered; on Codex and opencode that is the recorded
@@ -189,8 +199,9 @@ under the root — the TAUT panel's contour. Details: [docs/STUDIO.md](docs/STUD
   with the lost-to diagnostic) · L3 obedience, across Claude Code, Codex and opencode.
 - **P3** ✓ — Studio: the loopback UI over the same verbs — form + body, passport, compiled
   previews, the bench with live SSE, pack validation.
-- **P4** — scenario graders (Claude Code `plugin eval` case format + agentskills `evals.json`),
-  `--scan` via an installed security scanner, usage from TAUT telemetry.
+- **P4** ✓ — L4 scenario graders (the `plugin eval` case format + `evals.json` import),
+  `--scan` through an installed content scanner, the usage column from a workspace's local
+  telemetry, and the pack-level role-collision rule.
 
 ## Development
 

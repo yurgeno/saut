@@ -43,9 +43,15 @@ function parseArgs(argv) {
     else if (a === '--taut') opts.taut = argv[++i];
     else if (a === '--deployment') opts.deployment = argv[++i];
     else if (a === '--no-taut') opts.noTaut = true;
+    else if (a === '--scan') opts.scan = true;
+    else if (a === '--scanner') opts.scanner = argv[++i];
+    else if (a === '--workspace') opts.workspace = argv[++i];
+    else if (a === '--since') opts.since = argv[++i];
+    else if (a === '--until') opts.until = argv[++i];
     else if (a === '--level') opts.level = Number(argv[++i]);
     else if (a === '--runs') opts.runs = Number(argv[++i]);
     else if (a === '--model') opts.model = argv[++i];
+    else if (a === '--judge-model') opts.judgeModel = argv[++i];
     else if (a === '--max-cost') opts.maxCost = Number(argv[++i]);
     else if (a === '--landscape') opts.landscape = argv[++i];
     else if (a === '--case') opts.case = argv[++i];
@@ -76,7 +82,8 @@ Commands
   preview <name> [dir] TAUT packs: the compiled bytes of one skill/agent per harness (engine render)
   test <skill|agent>   the bench: L1 compile into a scratch workspace · L2 trigger (does each
                        harness fire the skill — explicit / implicit / control) · L3 obedience
-                       (do the runs stay inside the allowlist). Spends money on L2+.
+                       (do the runs stay inside the allowlist) · L4 scenario graders. Spends
+                       money on L2+.
 
 Options
   --harness <ids>      comma-separated subset (default: every registered harness)
@@ -84,6 +91,10 @@ Options
   --live               ask each catalog server for tools/list over stdio (spawns them)
   --exact              cost via the Claude token-counting API (ANTHROPIC_API_KEY)
   --budget <file>      budgets JSON {descriptionChars, alwaysOnTokens, invokeTokens} (else saut.json)
+  --scan [--scanner id] fold an installed content scanner's findings into the lint
+                       (skillspector | snyk agent scan | skill-scanner — rented, never bundled)
+  --workspace <dir>    a compiled TAUT workspace: adds the USED column from its local telemetry
+                       (--since / --until YYYY-MM-DD)
   --json | --sarif     machine output (sarif: lint only)
   --strict             lint exits 1 on medium findings too (default: high only)
 
@@ -95,8 +106,9 @@ TAUT packs (auto-detected: pack.json + skills/ or <project>/deployment.json)
   pack catalog, passport/preview carry the compiled bytes + recorded degradations per harness.
 
 Bench (saut test)
-  --level 1|2|3        cumulative (default 3) · --runs <n> per case (default 1) · --case <glob>
+  --level 1|2|3|4      cumulative (default 3; 4 = scenario graders) · --runs <n> (default 1) · --case <glob>
   --model <id>         harness model (default cheap: claude haiku, codex gpt-5.4-mini)
+  --judge-model <id>   model for L4 llm/baseline graders (default haiku)
   --max-cost <usd>     stop when Claude-reported spend reaches this ceiling
   --landscape <dir>    TAUT: a real landscape, COPIED into the scratch (default: stub repos)
   --out <dir>          results (default <artifact>/evals/results/<timestamp>/) · --keep scratch

@@ -60,6 +60,16 @@ with an engine the adapter judges against the pack's real catalog and the shape 
 | `taut-wiring-unknown-key` | medium | (engine) a `metadata.taut` key the engine never reads | C2 |
 | `taut-compile` | high | (engine) the marker pass or the engine's frontmatter parser refuses the source, `metadata.taut` varies by branch, legacy `metadata.federation`, name ≠ directory — the pack will not compile | PACK.md §10 |
 | `taut-empty-wiring` | info | (engine) `metadata.taut: {}` — the engine reads `{}` as a string; omit the key | — |
+| `taut-role-collision` | high | (engine) two skills in the pack declare the same `metadata.taut.role` — the engine resolves a role to ONE skill, so which one the compiled instructions name depends on catalog order | found by the Studio gate, 2026-09-03 |
+
+## Rented: content scanning
+
+`saut lint --scan` runs whichever content scanner is installed — [SkillSpector](https://github.com/nvidia/skillspector),
+[Snyk Agent Scan](https://github.com/snyk/agent-scan), [Cisco skill-scanner](https://github.com/cisco-ai-defense/skill-scanner) —
+and folds its findings into the same stream under `scan-*` codes (severities normalized, JSON
+and SARIF both parsed). Nothing is bundled or downloaded: with no scanner installed the flag
+says so plainly and SAUT's own rules still run. What SAUT owns is the part no scanner
+produces — the per-harness privilege semantics.
 
 ## Output
 

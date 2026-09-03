@@ -12,6 +12,7 @@ export interface BenchCase {
   timeoutSeconds: number;
   model?: string;                  // per-case override (case frontmatter `model`)
   file?: string;                   // the prompt.md this came from
+  assertions?: { kind: string; value: string }[];   // agentskills evals.json assertions, imported
 }
 
 export interface ToolCall {
@@ -43,6 +44,8 @@ export interface Trace {
   turns: number | null;
   finalText: string;
   rawFile?: string;                // path to the stored raw event stream
+  graders?: { name: string; type: string; pass: boolean; detail: string }[];   // L4
+  score?: number;                  // L4: fraction of graders passed
 }
 
 export interface Obedience {
@@ -60,6 +63,8 @@ export interface RunReport {
   traces: Trace[];
   trigger: { fireRate: number | null; controlClean: boolean | null; lostTo: string[] };  // over runs of expect=fire / expect=no-fire; lostTo = skills that fired instead
   obedience: Obedience | null;
+  scenario: { score: number | null; graded: number; failed: string[] } | null;   // L4
+  skipped: { case: string; why: string }[];   // cases that cannot fire by construction
   costUsd: number;
   tokens: number;
 }

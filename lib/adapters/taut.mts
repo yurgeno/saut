@@ -209,6 +209,13 @@ export function lintWiring(a: Artifact, ctx: TautContext): Diagnostic[] {
   const known = ctx.project?.repos?.known ? Object.keys(ctx.project.repos.known) : null;
   for (const r of Array.isArray(w.repos) ? w.repos.map(String) : []) if (known && !known.includes(r)) d('taut-repo-unknown', 'high', `metadata.taut.repos names "${r}" — not in deployment "${ctx.project!.name}" repo map (the engine fails the compile)`);
   if (typeof w.role === 'string' && !KNOWN_ROLES.has(w.role)) d('taut-role-unknown', 'info', `metadata.taut.role "${w.role}" is not a role the engine consumes (${[...KNOWN_ROLES].join(', ')})`);
+  // Role COLLISION: the engine resolves a role to ONE skill (the generated instructions name
+  // it, `renderStackSkill` wraps it). Two claimants make which one wins depend on catalog
+  // order — found the hard way when a new skill silently took `init` from another.
+  if (typeof w.role === 'string' && KNOWN_ROLES.has(w.role)) {
+    const rivals = [...ctx.catalog.skills].filter(([n, e]) => n !== a.name && (e.meta as { role?: string } | undefined)?.role === w.role).map(([n]) => n);
+    if (rivals.length) d('taut-role-collision', 'high', `metadata.taut.role "${w.role}" is also declared by ${rivals.join(', ')} — the engine resolves the role to ONE skill, so which one the compiled instructions name depends on catalog order`);
+  }
   return out;
 }
 

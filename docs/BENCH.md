@@ -7,6 +7,7 @@ Three cumulative levels. L1 is free; L2 and L3 call real models and cost real mo
 | **L1 compile** | does the artifact land where each harness looks for it? | free |
 | **L2 trigger** | does the harness actually fire this skill — explicitly, implicitly, and *not* on an unrelated prompt? | one model run per case per harness |
 | **L3 obedience** | do the runs stay inside the declared allowlist, and what does the harness refuse? | the same runs |
+| **L4 scenario** | did the run actually do the job — graders over the transcript, the tool trace and the files it produced | the same runs, plus a cheap judge call per `llm` grader |
 
 ```bash
 saut test skills/dev-review                        # L3, 1 run per case, every runnable harness
@@ -80,14 +81,56 @@ The bench pre-approves `Skill` (the mechanism under test) and withholds the shel
 mutation attempt surfaces as a denial rather than running. Read-only commands still execute
 under the harness's own classifier.
 
+## L4 — scenario graders
+
+Graders live beside the case, in Claude Code's `plugin eval` layout, so a suite written here
+works there when that CLI is enabled:
+
+```
+skills/status-report/evals/report/prompt.md
+skills/status-report/evals/report/graders/ran-git-status.md
+skills/status-report/evals/report/graders/wrote-the-file.md
+```
+
+Each grader is a markdown file whose frontmatter carries its `type`:
+
+| type | frontmatter | passes when |
+|---|---|---|
+| `regex` | `pattern`, `flags`, `match: contains \| not_contains \| count:N` | the source matches |
+| `tool_used` | `tool`, `input_match`, `min`, `max` | the tool was called that many times (`tool: Skill` also honours an expansion, which leaves no call behind) |
+| `tool_order` | `before`, `after` | the first appears before the last |
+| `file_exists` | `path` (glob) | the run produced a matching file **in the scratch workspace** |
+| `llm` | `criteria` | a cheap judge says so |
+| `baseline` | `criteria`, `baseline_file` | the judge finds the run equivalent to a stored reference |
+
+`source` picks what a grader reads: `last_message` (default), `trace`, `files`, or
+`{source: file, path: …}`. The judge is asked for one line of JSON and nothing else; a reply
+it cannot parse is a **failed** grader, never a silent pass, and the material is framed as
+data rather than instructions.
+
+An `evals/evals.json` written to the [agentskills.io](https://agentskills.io/skill-creation/evaluating-skills)
+spec is imported too: each entry becomes a case and its `assertions` become regex graders.
+
+## Cases that cannot fire
+
+An implicit case against a skill with `disable-model-invocation: true` is unwinnable by
+construction — the harness is forbidden to choose it. The bench says so and **spends nothing**
+on that case, instead of reporting a 0 % trigger rate the description cannot fix.
+
 ## Isolation and cost
 
-- Scratch workspace, deleted unless `--keep`. Codex runs `--sandbox read-only --ephemeral`;
+- Scratch workspace, deleted unless `--keep`. A harness may keep per-project state *outside*
+  the directory it was pointed at — Claude Code derives an auto-memory directory from the cwd —
+  so the bench removes its own such directories with the scratch (name-guarded, twice).
+  A consequence worth knowing while authoring: a skill that says "write to `memory/x.md`" can
+  land in the harness's memory rather than the workspace, which a `file_exists` grader catches.
+- Codex runs `--sandbox read-only --ephemeral`;
   opencode gets deny-by-default permissions; Claude runs `--permission-mode dontAsk` with the
   grant above and `--setting-sources project`.
 - Cheap models by default (`haiku`, `gpt-5.4-mini`); `--model` overrides, `--max-cost <usd>`
   stops the bench when Claude-reported spend reaches the ceiling (Codex and opencode do not
-  report cost — token totals are reported instead).
+  report cost — token totals are reported instead). `--judge-model` sets the L4 judge (default
+  `haiku`); its cost counts against the same ceiling.
 - `--runs n` for a fire *rate* rather than a single sample. One run is a smoke test; three is
   the smallest number that distinguishes "always" from "sometimes".
 
@@ -96,7 +139,7 @@ under the harness's own classifier.
 `<artifact>/evals/results/<timestamp>/matrix.json` — the full result: every trace with its
 tool calls, usage, cost and the path to the raw event stream under `traces/`. `--out` moves
 it, `--json` prints it. Exit code 1 when the compile failed, a fire rate is 0, a control
-fired, or a call landed outside the allowlist.
+fired, a call landed outside the allowlist, or a scenario scored below 100 %.
 
 Results land next to the artifact by convention (the `plugin eval` layout). In a pack under
 version control, add `evals/results/` to `.gitignore` — the cases are source, the runs are not.

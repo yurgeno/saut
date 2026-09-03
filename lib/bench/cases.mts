@@ -14,6 +14,29 @@ const CONTROL_PROMPT = 'Reply with the single word PONG and nothing else.';
 export async function loadCases(a: Artifact, filter?: string): Promise<BenchCase[]> {
   const dir = a.kind === 'skill' ? path.join(a.dir, 'evals') : path.join(path.dirname(a.path), 'evals', a.name);
   const out: BenchCase[] = [];
+  // agentskills.io `evals/evals.json` — imported as cases so a suite written to the spec
+  // runs here unchanged; its `assertions` ride along and are graded as regex checks.
+  const specFile = path.join(dir, 'evals.json');
+  if (await exists(specFile)) {
+    try {
+      const j = JSON.parse(await fs.readFile(specFile, 'utf8')) as { evals?: any[] };
+      for (const e of j.evals ?? []) {
+        out.push({
+          name: String(e.name ?? e.id ?? `spec-${out.length + 1}`),
+          source: 'evals',
+          prompt: String(e.prompt ?? ''),
+          invocation: 'implicit',
+          expect: 'fire',
+          tags: ['evals.json'],
+          maxTurns: Number(e.max_turns ?? 8),
+          timeoutSeconds: Number(e.timeout_seconds ?? 300),
+          file: specFile,
+          assertions: (Array.isArray(e.assertions) ? e.assertions : []).map((x: any) =>
+            (typeof x === 'string' ? { kind: 'contains', value: x } : { kind: String(x.type ?? 'contains'), value: String(x.value ?? x.text ?? '') })),
+        });
+      }
+    } catch { /* a malformed spec file is reported by the run as zero cases */ }
+  }
   if (await exists(dir)) {
     for await (const f of walk(dir)) {
       if (path.basename(f) !== 'prompt.md') continue;

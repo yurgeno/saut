@@ -8,6 +8,8 @@ import { costOf, estimateTokens, overBudget } from './cost.mts';
 import { lintArtifact, matrix, sortDiags, toSarif } from './lint.mts';
 import { discover, loadAgent } from './skill.mts';
 import { buildRegistry } from './tools.mts';
+import { scan } from './scan.mts';
+import { readUsage, usageFor, type UsageData } from './usage.mts';
 import { catalogServers, detectTaut, lintWiring, previews, refine, type TautContext, type TautPreview } from './adapters/taut.mts';
 import { runBench } from './bench/bench.mts';
 import { startStudio } from './studio/server.mts';
@@ -31,10 +33,16 @@ export interface Opts {
   taut?: string;           // TAUT engine dir (adapter); auto: SAUT_TAUT_ENGINE, ~/taut, ~/federation
   deployment?: string;     // TAUT deployment (project) when the pack has several
   noTaut?: boolean;        // force plain mode on a TAUT pack
+  scan?: boolean;          // fold an installed content scanner's findings into the lint
+  scanner?: string;        // pin one scanner id
+  workspace?: string;      // a compiled TAUT workspace — reads its telemetry for the usage column
+  since?: string;
+  until?: string;
   // test bench
-  level?: number;          // 1 compile · 2 + trigger · 3 + obedience (default 3)
+  level?: number;          // 1 compile · 2 + trigger · 3 + obedience · 4 + scenario graders (default 3)
   runs?: number;           // per case (default 1)
   model?: string;          // harness model override (default: the runner's cheap tier)
+  judgeModel?: string;     // L4 LLM-grader model (default haiku)
   maxCost?: number;        // USD ceiling over Claude-reported costs
   landscape?: string;      // TAUT: a real landscape dir, COPIED into scratch (default: stub repos)
   case?: string;           // case name glob
@@ -96,7 +104,7 @@ export async function load(targets: string[], opts: Opts): Promise<Loaded> {
 }
 
 // ---- lint ---------------------------------------------------------------------------
-export async function runLint(targets: string[], opts: Opts): Promise<{ diagnostics: Diagnostic[]; artifacts: Artifact[]; harnesses: HarnessCaps[]; taut: TautContext | null; note: string | null }> {
+export async function runLint(targets: string[], opts: Opts): Promise<{ diagnostics: Diagnostic[]; artifacts: Artifact[]; harnesses: HarnessCaps[]; taut: TautContext | null; note: string | null; scanNote?: string | null; scanners?: string[] }> {
   const { artifacts, harnesses, registry, agentsByName, taut, tautFindings, note } = await load(targets, opts);
   const diagnostics: Diagnostic[] = [...tautFindings];
   for (const a of artifacts) {
@@ -108,17 +116,27 @@ export async function runLint(targets: string[], opts: Opts): Promise<{ diagnost
     }
     diagnostics.push(...ds);
   }
-  return { diagnostics: sortDiags(diagnostics), artifacts, harnesses, taut, note };
+  let scanNote: string | null = null;
+  let scanners: string[] = [];
+  if (opts.scan) {
+    const target = taut ? taut.packRoot : path.resolve(targets[0] ?? '.');
+    const r = await scan(target, { scanner: opts.scanner });
+    diagnostics.push(...r.diagnostics);
+    scanNote = r.note; scanners = r.ran;
+  }
+  return { diagnostics: sortDiags(diagnostics), artifacts, harnesses, taut, note, scanNote, scanners };
 }
 
 export async function cmdLint(opts: Opts): Promise<number> {
-  const { diagnostics, artifacts, harnesses, taut, note } = await runLint(opts._, opts);
+  const { diagnostics, artifacts, harnesses, taut, note, scanNote, scanners } = await runLint(opts._, opts);
   if (opts.sarif) { process.stdout.write(JSON.stringify(toSarif(diagnostics, VERSION), null, 2) + '\n'); }
   else if (opts.json) { process.stdout.write(JSON.stringify({ version: VERSION, artifacts: artifacts.map((a) => ({ kind: a.kind, name: a.name, path: a.path })), diagnostics }, null, 2) + '\n'); }
   else {
     if (!artifacts.length) { process.stdout.write('no skills or agents found\n'); return 1; }
     if (taut) process.stdout.write(c.dim(`TAUT pack ${rel(taut.packRoot)} · engine ${rel(taut.engine)}${taut.engineCommit ? ` @${taut.engineCommit}` : ''}${taut.project ? ` · deployment ${taut.project.name}` : ''} — engine-parsed frontmatter, wiring checked against the catalog\n`));
     else if (note) process.stdout.write(c.dim(note + '\n'));
+    if (scanners?.length) process.stdout.write(c.dim(`content scan: ${scanners.join(', ')}\n`));
+    if (scanNote) process.stdout.write(c.yellow(scanNote + '\n'));
     const byPath = new Map<string, Diagnostic[]>();
     for (const x of diagnostics) byPath.set(x.path, [...(byPath.get(x.path) ?? []), x]);
     for (const a of artifacts) {
@@ -142,7 +160,7 @@ export async function cmdLint(opts: Opts): Promise<number> {
 }
 
 // ---- cost ---------------------------------------------------------------------------
-export async function runCost(targets: string[], opts: Opts): Promise<{ lines: { line: CostLine; over: string[]; artifact: Artifact }[]; harness: HarnessCaps | null; budgets: Budgets }> {
+export async function runCost(targets: string[], opts: Opts): Promise<{ lines: { line: CostLine; over: string[]; artifact: Artifact }[]; harness: HarnessCaps | null; budgets: Budgets; usage: UsageData | null }> {
   const { artifacts, harnesses, agentsByName } = await load(targets, opts);
   const harness = harnesses.length === 1 ? harnesses[0] : harnesses.find((h) => h.id === 'claude-code') ?? null;
   const budgets = await budgetsFor(targets, opts);
@@ -151,27 +169,33 @@ export async function runCost(targets: string[], opts: Opts): Promise<{ lines: {
     const line = await costOf(a, { harness, exact: !!opts.exact, agentsByName: agentsByName as Map<string, Artifact> });
     lines.push({ line, over: overBudget(line, a, budgets), artifact: a });
   }
-  return { lines, harness, budgets };
+  const usage = opts.workspace ? await readUsage(opts.workspace, { since: opts.since, to: opts.until }) : null;
+  return { lines, harness, budgets, usage };
 }
 
 const k = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
 
 export async function cmdCost(opts: Opts): Promise<number> {
-  const { lines, harness, budgets } = await runCost(opts._, opts);
-  if (opts.json) { process.stdout.write(JSON.stringify({ version: VERSION, harness: harness?.id ?? null, budgets, lines: lines.map((l) => ({ ...l.line, over: l.over })) }, null, 2) + '\n'); return lines.some((l) => l.over.length) ? 1 : 0; }
+  const { lines, harness, budgets, usage } = await runCost(opts._, opts);
+  if (opts.json) { process.stdout.write(JSON.stringify({ version: VERSION, harness: harness?.id ?? null, budgets, usage: usage ? { workspace: usage.workspace, days: usage.days, from: usage.from, to: usage.to } : null, lines: lines.map((l) => ({ ...l.line, over: l.over, usage: usageFor(usage, l.artifact.name) })) }, null, 2) + '\n'); return lines.some((l) => l.over.length) ? 1 : 0; }
   if (!lines.length) { process.stdout.write('no skills or agents found\n'); return 1; }
   const method = lines[0].line.method;
   process.stdout.write(`${c.bold('cost passport')} ${c.dim(`(${method}${harness ? `, listing per ${harness.id}` : ''})`)}\n`);
-  process.stdout.write(`  ${'artifact'.padEnd(28)} ${'always-on'.padStart(10)} ${'on-invoke'.padStart(10)} ${'transitive'.padStart(10)}\n`);
+  process.stdout.write(`  ${'artifact'.padEnd(28)} ${'always-on'.padStart(10)} ${'on-invoke'.padStart(10)} ${'transitive'.padStart(10)}${usage ? `${'used'.padStart(10)}` : ''}\n`);
   let on = 0, inv = 0;
   for (const { line, over, artifact } of lines) {
     const tr = line.transitive.reduce((s, t) => s + t.tokens, 0);
     on += line.alwaysOnTokens; inv += line.invokeTokens + tr;
-    process.stdout.write(`  ${`${artifact.kind === 'agent' ? '@' : ''}${line.artifact}`.padEnd(28)} ${k(line.alwaysOnTokens).padStart(10)} ${k(line.invokeTokens).padStart(10)} ${(tr ? '+' + k(tr) : '').padStart(10)}${over.length ? '  ' + c.yellow('over: ' + over.join('; ')) : ''}\n`);
+    const u = usageFor(usage, line.artifact);
+    const uText = u ? `${u.allow}${u.deny ? `/${u.deny}⊘` : ''}` : '0';
+    const uCol = usage ? ' '.repeat(Math.max(0, 10 - uText.length)) + (u ? (u.allow ? uText : c.yellow(uText)) : c.dim(uText)) : '';
+    process.stdout.write(`  ${`${artifact.kind === 'agent' ? '@' : ''}${line.artifact}`.padEnd(28)} ${k(line.alwaysOnTokens).padStart(10)} ${k(line.invokeTokens).padStart(10)} ${(tr ? '+' + k(tr) : '').padStart(10)}${uCol}${over.length ? '  ' + c.yellow('over: ' + over.join('; ')) : ''}\n`);
     for (const t of line.transitive) process.stdout.write(`  ${c.dim(`  ↳ ${t.name}`.padEnd(28))} ${''.padStart(10)} ${''.padStart(10)} ${k(t.tokens).padStart(10)}\n`);
   }
   process.stdout.write(`  ${'TOTAL'.padEnd(28)} ${k(on).padStart(10)} ${k(inv).padStart(10)}\n`);
   process.stdout.write(c.dim(`  always-on = name + description, paid in every session; on-invoke = body (+ wired agents / referenced files). ${method === 'estimate' ? 'Estimates — run with --exact (ANTHROPIC_API_KEY) for API-counted tokens.' : 'Counted by the Claude token-counting API.'}\n`));
+  if (usage) process.stdout.write(c.dim(`  used = invocations recorded by ${rel(usage.workspace)} over ${usage.days} day(s)${usage.from ? ` (${usage.from}…${usage.to})` : ''}; ⊘ = denied. Local telemetry, never sent anywhere.\n`));
+  else if (opts.workspace) process.stdout.write(c.yellow(`  no telemetry under ${rel(path.resolve(opts.workspace))}/memory/telemetry\n`));
   return lines.some((l) => l.over.length) ? 1 : 0;
 }
 
@@ -251,13 +275,13 @@ export async function cmdTest(opts: Opts): Promise<number> {
   }
   const a = targets[0];
   const siblings = taut ? [...(await load([taut.packRoot], { ...opts, _: [] })).artifacts] : artifacts;
-  const level = (opts.level ?? 3) as 1 | 2 | 3;
+  const level = Math.min(4, Math.max(1, opts.level ?? 3)) as 1 | 2 | 3 | 4;
   const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   const outDir = opts.out ?? path.join(a.kind === 'skill' ? a.dir : path.dirname(a.path), 'evals', 'results', ts);
   const log = (e: { kind: string; text: string }) => { if (!opts.json) process.stderr.write(`${e.kind === 'fail' ? c.red(e.kind.padEnd(6)) : e.kind === 'ok' ? c.green(e.kind.padEnd(6)) : c.dim(e.kind.padEnd(6))} ${e.text}\n`); };
   if (!opts.json) process.stderr.write(`${c.bold(`bench ${a.kind} ${a.name}`)} ${c.dim(`level ${level} · runs ${opts.runs ?? 1} · ${taut ? `TAUT pack ${rel(taut.packRoot)} via ${rel(taut.engine)}` : 'generic'} · harnesses ${harnesses.filter((h) => h.runner).map((h) => h.id).join(',')}`)}\n`);
   const result = await runBench({
-    artifact: a, siblings, harnesses, taut, level, runs: opts.runs ?? 1, model: opts.model, maxCostUsd: opts.maxCost ?? null,
+    artifact: a, siblings, harnesses, taut, level, runs: opts.runs ?? 1, model: opts.model, judgeModel: opts.judgeModel, maxCostUsd: opts.maxCost ?? null,
     landscape: opts.landscape ? path.resolve(opts.landscape) : null, caseFilter: opts.case, outDir, keepScratch: !!opts.keep,
     timeoutMs: (opts.timeout ?? 300) * 1000, version: VERSION, onEvent: log,
   });
@@ -269,7 +293,7 @@ export async function cmdTest(opts: Opts): Promise<number> {
 
 function benchExit(r: BenchResult): number {
   if (!r.compiled.ok) return 1;
-  const bad = r.reports.some((rep) => rep.available && ((rep.trigger.fireRate !== null && rep.trigger.fireRate === 0) || rep.trigger.controlClean === false || (rep.obedience?.violations.length ?? 0) > 0));
+  const bad = r.reports.some((rep) => rep.available && ((rep.trigger.fireRate !== null && rep.trigger.fireRate === 0) || rep.trigger.controlClean === false || (rep.obedience?.violations.length ?? 0) > 0 || (rep.scenario !== null && rep.scenario.score !== null && rep.scenario.score < 1)));
   return bad ? 1 : 0;
 }
 
@@ -283,10 +307,15 @@ function printBench(r: BenchResult): void {
     const ob = rep.obedience;
     process.stdout.write(`  ${c.bold(rep.harness.padEnd(12))} trigger ${t.fireRate === null ? '—' : t.fireRate > 0 ? c.green(pct(t.fireRate)) : c.red(pct(t.fireRate))} · control ${t.controlClean === null ? '—' : t.controlClean ? c.green('clean') : c.red('FIRED')}`
       + (t.lostTo.length ? c.yellow(` · lost to ${t.lostTo.join(', ')}`) : '')
+      + (rep.scenario && rep.scenario.score !== null ? ` · scenario ${rep.scenario.score === 1 ? c.green('100%') : c.red(Math.round(rep.scenario.score * 100) + '%')}${rep.scenario.failed.length ? c.dim(` (${rep.scenario.failed.join(', ')})`) : ''}` : '')
       + (ob ? ` · obedience ${ob.violations.length ? c.red(`${ob.violations.length} outside allowlist`) : c.green('inside allowlist')}${ob.denied.length ? c.dim(` · ${ob.denied.length} denied`) : ''} ${c.dim(`[${ob.enforcement}]`)}` : '')
       + c.dim(` · ${rep.traces.length} runs · ${rep.costUsd ? `$${rep.costUsd.toFixed(3)}` : `${(rep.tokens / 1000).toFixed(0)}k tok`}`) + '\n');
-    for (const tr of rep.traces) process.stdout.write(c.dim(`    ${tr.case.name.padEnd(10)} ${tr.status.padEnd(7)} fired=${tr.fired.padEnd(9)}${tr.firedOther.length ? ` lost-to=${tr.firedOther.join(',')} ` : ''} tools=${tr.tools.map((x) => x.neutral + (x.denied ? '⊘' : '')).join(',') || '—'}\n`));
+    for (const tr of rep.traces) {
+      process.stdout.write(c.dim(`    ${tr.case.name.padEnd(10)} ${tr.status.padEnd(7)} fired=${tr.fired.padEnd(9)}${tr.firedOther.length ? ` lost-to=${tr.firedOther.join(',')} ` : ''} tools=${tr.tools.map((x) => x.neutral + (x.denied ? '⊘' : '')).join(',') || '—'}\n`));
+      for (const g of tr.graders ?? []) process.stdout.write(`      ${g.pass ? c.green('pass') : c.red('FAIL')} ${g.name} ${c.dim(`(${g.type}) ${g.detail}`)}\n`);
+    }
     if (ob?.violations.length) process.stdout.write(`    ${c.yellow('outside allowlist:')} ${ob.violations.join(', ')}\n`);
+    for (const sk of rep.skipped) process.stdout.write(`    ${c.dim(sk.case.padEnd(10))} ${c.yellow('skipped')} ${c.dim(sk.why)}\n`);
     const blocked = rep.traces.filter((x) => x.fired === 'blocked');
     if (blocked.length) process.stdout.write(`    ${c.yellow('invocation refused:')} the harness denied the Skill call in ${blocked.length} run(s) — a gate or a permission rule in this workspace, not the artifact\n`);
     const comp = rep.traces.find((x) => x.competing)?.competing;
