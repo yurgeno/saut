@@ -15,7 +15,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { parseFrontmatter } from '../frontmatter.mts';
+import { bodyOf, parseFrontmatter } from '../frontmatter.mts';
 import { toolList } from '../skill.mts';
 import type { Artifact, Diagnostic, SkillArtifact, ToolCatalogServer } from '../types.mts';
 import { exists, isDir, readText } from '../util.mts';
@@ -113,6 +113,19 @@ export async function detectTaut(targets: string[], opts: { taut?: string | null
   };
 }
 
+// Structural equality — comparing JSON strings made KEY ORDER decide the verdict, so
+// {agents, role} vs {role, agents} was reported as "varies by capability branch".
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((x, i) => deepEqual(x, b[i]));
+  const ka = Object.keys(a as object).sort();
+  const kb = Object.keys(b as object).sort();
+  return ka.length === kb.length && ka.every((k, i) => k === kb[i])
+    && ka.every((k) => deepEqual((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]));
+}
+
 export function catalogServers(ctx: TautContext): ToolCatalogServer[] {
   return Object.entries(ctx.mcp).map(([id, s]) => ({
     serverKey: s.serverKey ?? id, role: s.role,
@@ -142,7 +155,7 @@ export async function refine(a: Artifact, ctx: TautContext): Promise<{ artifact:
   if (a.kind === 'agent') {
     const fm = parseFrontmatter(on, a.path);
     const dOn = fm.data;
-    return { artifact: { ...a, fm, description: typeof dOn.description === 'string' ? dOn.description : a.description, body: on.replace(/^---\n[\s\S]*?\n---\n?/, ''), tools: unionTools(a.tools, toolList(dOn.tools)), model: typeof dOn.model === 'string' ? dOn.model : null }, findings };
+    return { artifact: { ...a, fm, description: typeof dOn.description === 'string' ? dOn.description : a.description, body: bodyOf(on, fm), tools: unionTools(a.tools, toolList(dOn.tools)), model: typeof dOn.model === 'string' ? dOn.model : null }, findings };
   }
   let fmOn: any; let fmOff: any;
   try {
@@ -152,7 +165,7 @@ export async function refine(a: Artifact, ctx: TautContext): Promise<{ artifact:
     findings.push({ code: 'taut-compile', severity: 'high', message: `the engine parser refuses this frontmatter: ${(e as Error).message}`, path: a.path });
     return { artifact: a, findings };
   }
-  if (JSON.stringify(fmOn.metadata?.taut ?? {}) !== JSON.stringify(fmOff.metadata?.taut ?? {}))
+  if (!deepEqual(fmOn.metadata?.taut ?? {}, fmOff.metadata?.taut ?? {}))
     findings.push({ code: 'taut-compile', severity: 'high', message: 'metadata.taut varies by capability branch — the engine fails the compile (wiring is capability-independent)', path: a.path });
   if (fmOn.metadata?.federation !== undefined)
     findings.push({ code: 'taut-compile', severity: 'high', message: 'legacy wiring key metadata.federation — the engine fails the compile; use metadata.taut', path: a.path });
@@ -167,7 +180,7 @@ export async function refine(a: Artifact, ctx: TautContext): Promise<{ artifact:
     const s: SkillArtifact = {
       ...a, fm,
       description: typeof fmOn.description === 'string' ? fmOn.description : a.description,
-      body: on.replace(/^---\n[\s\S]*?\n---\n?/, ''),
+      body: bodyOf(on, generic),      // CRLF-safe: a Windows-authored file must not keep its frontmatter in the body
       allowedTools: unionTools(a.allowedTools, toolList(fmOn['allowed-tools'])),
       disallowedTools: unionTools(a.disallowedTools, toolList(fmOn['disallowed-tools'])),
       modelInvocable: fmOn['disable-model-invocation'] !== true,

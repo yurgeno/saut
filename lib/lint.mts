@@ -6,6 +6,7 @@
 // declared allowlist is a restriction, a grant, prose, or dropped on that harness.
 import type { AgentArtifact, Artifact, Diagnostic, HarnessCaps, ToolRef, ToolRegistry } from './types.mts';
 import { bodyToolMentions } from './skill.mts';
+import path from 'node:path';
 import { classifyTool } from './tools.mts';
 
 export interface LintOptions {
@@ -206,7 +207,7 @@ export function matrix(a: Artifact, harnesses: HarnessCaps[]): { harness: string
 }
 
 // SARIF 2.1.0 — the interchange format CI/IDE tooling reads (same as Cisco skill-scanner).
-export function toSarif(ds: Diagnostic[], version: string): unknown {
+export function toSarif(ds: Diagnostic[], version: string, base?: string): unknown {
   const rules = [...new Set(ds.map((x) => x.code))].map((id) => ({ id, shortDescription: { text: id } }));
   const level = (s: string) => (s === 'high' ? 'error' : s === 'medium' ? 'warning' : 'note');
   return {
@@ -214,9 +215,12 @@ export function toSarif(ds: Diagnostic[], version: string): unknown {
     version: '2.1.0',
     runs: [{
       tool: { driver: { name: 'saut', version, informationUri: 'https://github.com/yurgeno/saut', rules } },
+      ...(base ? { originalUriBaseIds: { ROOT: { uri: `file://${base.endsWith('/') ? base : base + '/'}` } } } : {}),
       results: ds.map((x) => ({
         ruleId: x.code, level: level(x.severity), message: { text: x.message + (x.harness ? ` [${x.harness}]` : '') },
-        locations: [{ physicalLocation: { artifactLocation: { uri: x.path }, region: { startLine: x.line ?? 1 } } }],
+        // GitHub code scanning needs a URI relative to a checkout root; an absolute local
+        // path either fails upload or attaches findings to a file nobody has.
+        locations: [{ physicalLocation: { artifactLocation: { uri: base ? path.relative(base, x.path) : x.path, uriBaseId: base ? 'ROOT' : undefined }, region: { startLine: x.line ?? 1 } } }],
       })),
     }],
   };

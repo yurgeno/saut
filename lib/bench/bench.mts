@@ -34,11 +34,35 @@ export interface BenchOptions {
 const say = (o: BenchOptions, kind: string, text: string) => o.onEvent?.({ kind, text });
 
 export async function runBench(o: BenchOptions): Promise<BenchResult> {
+  const root = await makeScratchRoot();
+  try {
+    return await bench(o, root);
+  } finally {
+    // Whatever went wrong, the scratch and the harness state created outside it go away.
+    if (!o.keepScratch) {
+      const swept = await cleanHarnessState(root).catch(() => [] as string[]);
+      if (swept.length) say(o, 'clean', `removed ${swept.length} harness state dir(s) the runs created outside the scratch`);
+      await fs.rm(root, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }
+}
+
+async function bench(o: BenchOptions, root: string): Promise<BenchResult> {
   const startedAt = new Date().toISOString();
   const a = o.artifact;
-  const root = await makeScratchRoot();
   const runnable = o.harnesses.filter((h) => h.runner);
   const harnessIds = runnable.map((h) => h.id);
+  if (!runnable.length) {
+    const why = o.harnesses.length
+      ? `none of ${o.harnesses.map((h) => h.id).join(', ')} has a headless runner — nothing to execute`
+      : 'no harness selected';
+    say(o, 'fail', why);
+    return {
+      version: o.version, artifact: { kind: a.kind, name: a.name, path: a.path }, mode: o.taut ? 'taut' : 'generic',
+      levels: [1], scratch: root, compiled: { ok: false, detail: why }, reports: [],
+      startedAt, finishedAt: new Date().toISOString(), budget: { maxCostUsd: o.maxCostUsd, spentUsd: 0, exhausted: false },
+    };
+  }
 
   // ---- L1: compile into a scratch workspace ------------------------------------------
   say(o, 'step', `L1 compile → ${root}`);
@@ -59,6 +83,10 @@ export async function runBench(o: BenchOptions): Promise<BenchResult> {
     reports.push(rep);
     const av = await available(h);
     if (!av.ok) { rep.available = false; rep.reason = av.reason; say(o, 'skip', `${h.id}: ${av.reason}`); continue; }
+    // The registry says "adding a harness is adding a file"; a file that declares a runner
+    // without an implementation must be a reported row, not a TypeError mid-run.
+    const runner = RUNNERS[h.id];
+    if (!runner) { rep.available = false; rep.reason = `no runner implementation for "${h.id}" (registry declares one)`; say(o, 'skip', rep.reason); continue; }
     if (!scratch.compiled.ok) { rep.available = false; rep.reason = 'L1 failed'; continue; }
     if (o.level < 2) continue;
     // the allowlist the run pre-approves for Claude: the artifact's own grant minus the shell
@@ -80,7 +108,7 @@ export async function runBench(o: BenchOptions): Promise<BenchResult> {
       for (let run = 1; run <= o.runs; run++) {
         if (exhausted) break;
         say(o, 'run', `${h.id} · ${c.name} (${c.invocation}, expect ${c.expect}) · run ${run}/${o.runs}`);
-        const trace: Trace = await RUNNERS[h.id]({ harness: h, artifact: a, cwd: scratch.ws, case: c, run, model: o.model, allowedTools, timeoutMs: Math.min(o.timeoutMs, c.timeoutSeconds * 1000), rawDir });
+        const trace: Trace = await runner({ harness: h, artifact: a, cwd: scratch.ws, case: c, run, model: o.model, allowedTools, timeoutMs: Math.min(o.timeoutMs, c.timeoutSeconds * 1000), rawDir });
         // L4: grade the scenario against this run — a scratch that still holds its files
         if (o.level >= 4 && trace.status === 'ok' && c.expect === 'fire') {
           const gs = gradersByCase.get(c.name) ?? [];
@@ -130,11 +158,6 @@ export async function runBench(o: BenchOptions): Promise<BenchResult> {
   };
   await fs.mkdir(o.outDir, { recursive: true });
   await fs.writeFile(path.join(o.outDir, 'matrix.json'), JSON.stringify(result, null, 2) + '\n');
-  if (!o.keepScratch) {
-    const swept = await cleanHarnessState(root);
-    if (swept.length) say(o, 'clean', `removed ${swept.length} harness state dir(s) the runs created outside the scratch`);
-    await fs.rm(root, { recursive: true, force: true }).catch(() => undefined);
-  }
   return result;
 }
 

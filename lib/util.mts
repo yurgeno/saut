@@ -30,17 +30,34 @@ export async function isDir(p: string): Promise<boolean> {
 
 // Recursive walk yielding files; skips the directories nobody wants scanned.
 const SKIP_DIRS = new Set(['node_modules', '.git', 'results', '.test-tmp', 'dist', '.saut-scratch']);
-export async function* walk(dir: string, depth = 12): AsyncGenerator<string> {
+
+// Symlinks are followed: marketplace and plugin layouts symlink skills heavily, and
+// `withFileTypes` reports a symlink as neither file nor directory — a linked skill used to
+// be silently invisible, which reads as a clean bill for a tree that was never scanned.
+// `visited` holds device+inode so a loop cannot spin forever.
+export async function* walk(dir: string, depth = 12, visited = new Set<string>()): AsyncGenerator<string> {
   if (depth < 0) return;
   let entries;
   try { entries = await fs.readdir(dir, { withFileTypes: true }); } catch { return; }
   for (const e of entries) {
     if (e.name.startsWith('.test-tmp')) continue;
     const p = path.join(dir, e.name);
-    if (e.isDirectory()) {
+    let isDirectory = e.isDirectory();
+    let isFile = e.isFile();
+    if (e.isSymbolicLink()) {
+      try {
+        const st = await fs.stat(p);                     // follows the link
+        const key = `${st.dev}:${st.ino}`;
+        if (visited.has(key)) continue;
+        visited.add(key);
+        isDirectory = st.isDirectory();
+        isFile = st.isFile();
+      } catch { continue; }                              // dangling link
+    }
+    if (isDirectory) {
       if (SKIP_DIRS.has(e.name)) continue;
-      yield* walk(p, depth - 1);
-    } else if (e.isFile()) yield p;
+      yield* walk(p, depth - 1, visited);
+    } else if (isFile) yield p;
   }
 }
 

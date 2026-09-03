@@ -7,8 +7,8 @@
 // fall out of the same walk without a special case.
 import path from 'node:path';
 import { parseFrontmatter, bodyOf } from './frontmatter.mts';
-import type { AgentArtifact, Artifact, SkillArtifact, ToolRef } from './types.mts';
-import { exists, isDir, readText, walk } from './util.mts';
+import type { AgentArtifact, Artifact, Diagnostic, SkillArtifact, ToolRef } from './types.mts';
+import { exists, fail, isDir, readText, walk } from './util.mts';
 
 const AGENT_DIRS = new Set(['agents', '.claude/agents', '.opencode/agents']);
 
@@ -108,32 +108,49 @@ function looksLikeAgentPath(file: string): boolean {
 
 // Resolve CLI targets (files or directories) to artifacts. A directory holding SKILL.md
 // is one skill; any other directory is walked.
-export async function discover(targets: string[]): Promise<Artifact[]> {
-  const out: Artifact[] = [];
+export interface Discovered { artifacts: Artifact[]; failures: Diagnostic[]; ignored: string[] }
+
+// A linter pointed at a tree of third-party skills must survive one unreadable or malformed
+// file: the failure becomes a diagnostic against that path, and the walk continues.
+export async function discoverDetailed(targets: string[]): Promise<Discovered> {
+  const artifacts: Artifact[] = [];
+  const failures: Diagnostic[] = [];
+  const ignored: string[] = [];
   const seen = new Set<string>();
   const add = async (file: string) => {
     const abs = path.resolve(file);
     if (seen.has(abs)) return;
     seen.add(abs);
-    if (path.basename(abs) === 'SKILL.md') out.push(await loadSkill(abs));
-    else if (abs.endsWith('.md') && looksLikeAgentPath(abs)) {
-      const a = await loadAgent(abs);
-      if (a.fm.diagnostics.some((x) => x.code === 'no-frontmatter')) return;   // a README under agents/
-      out.push(a);
+    try {
+      if (path.basename(abs) === 'SKILL.md') artifacts.push(await loadSkill(abs));
+      else if (abs.endsWith('.md') && looksLikeAgentPath(abs)) {
+        const a = await loadAgent(abs);
+        if (a.fm.diagnostics.some((x) => x.code === 'no-frontmatter')) return;   // a README under agents/
+        artifacts.push(a);
+      }
+    } catch (e) {
+      failures.push({ code: 'load-failed', severity: 'high', message: `could not be read: ${(e as Error).message}`, path: abs });
     }
   };
   for (const t of targets) {
     const abs = path.resolve(t);
-    if (!(await exists(abs))) throw new Error(`no such path: ${t}`);
+    if (!(await exists(abs))) fail(`no such path: ${t}`);
     if (await isDir(abs)) {
       if (await exists(path.join(abs, 'SKILL.md'))) { await add(path.join(abs, 'SKILL.md')); continue; }
       for await (const f of walk(abs)) await add(f);
     } else if (abs.endsWith('.md')) {
       if (path.basename(abs) === 'SKILL.md') await add(abs);
-      else out.push(await loadAgent(abs));            // explicit file = trust the caller
-    }
+      else {
+        try { artifacts.push(await loadAgent(abs)); }      // explicit file = trust the caller
+        catch (e) { failures.push({ code: 'load-failed', severity: 'high', message: `could not be read: ${(e as Error).message}`, path: abs }); }
+      }
+    } else ignored.push(abs);                                // not a markdown target — say so, don't drop it silently
   }
-  return out;
+  return { artifacts, failures, ignored };
+}
+
+export async function discover(targets: string[]): Promise<Artifact[]> {
+  return (await discoverDetailed(targets)).artifacts;
 }
 
 // Prose EVIDENCE that a builtin tool is actually used by a body (for the dead-privilege

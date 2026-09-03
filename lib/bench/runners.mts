@@ -3,6 +3,7 @@
 // and for opencode a reachable provider) so a missing harness is a reported row, never a crash.
 import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
 import type { Artifact, HarnessCaps } from '../types.mts';
 import type { BenchCase, ToolCall, Trace } from './types.mts';
@@ -21,9 +22,17 @@ export interface RunSpec {
 
 const DEFAULT_MODEL: Record<string, string | undefined> = { 'claude-code': 'haiku', codex: 'gpt-5.4-mini', opencode: undefined };
 
+// An EMPTY PATH entry means "the current directory" to both path.join and execFile, so a
+// file named `claude` in a scanned repository would look installed and then be executed.
+// Existence is not enough either — the entry must be executable.
 export async function which(bin: string): Promise<boolean> {
-  const dirs = (process.env.PATH ?? '').split(path.delimiter);
-  for (const d of dirs) { try { await fs.access(path.join(d, bin)); return true; } catch { /* next */ } }
+  const exts = process.platform === 'win32' ? (process.env.PATHEXT ?? '.EXE;.CMD;.BAT').split(';') : [''];
+  for (const d of (process.env.PATH ?? '').split(path.delimiter)) {
+    if (!d) continue;
+    for (const ext of exts) {
+      try { await fs.access(path.join(d, bin + ext), fsConstants.X_OK); return true; } catch { /* next */ }
+    }
+  }
   return false;
 }
 
@@ -35,8 +44,12 @@ export async function available(h: HarnessCaps): Promise<{ ok: boolean; reason?:
 }
 
 // The prompt as the harness wants it: explicit invocation syntax differs per harness.
+// A prompt that begins with `-` would be parsed as a flag by the harness CLI. Prompts come
+// from case files, which are data — never let one turn into an argument.
+const safePrompt = (p: string): string => (p.startsWith('-') ? ` ${p}` : p);
+
 export function renderPrompt(h: HarnessCaps, a: Artifact, c: BenchCase): string {
-  if (c.invocation !== 'explicit') return c.prompt;
+  if (c.invocation !== 'explicit') return safePrompt(c.prompt);
   const args = c.prompt ? ` ${c.prompt}` : '';
   if (h.id === 'claude-code') return `/${a.name}${args}`;
   if (h.id === 'codex') return `$${a.name}${args}`;

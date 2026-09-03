@@ -15,6 +15,7 @@ import { exists, readText, walk } from '../util.mts';
 import type { Trace } from './types.mts';
 
 const run = promisify(execFile);
+const JUDGE_TIMEOUT_MS = 5 * 60 * 1000;
 
 export interface Grader {
   name: string;
@@ -65,10 +66,16 @@ async function sourceText(g: Grader, ctx: GradeContext): Promise<string> {
     const p = path.resolve(ctx.ws, rel);
     // A source that cannot be read must FAIL the grader, not silently grade the empty
     // string — a `not_contains` check would otherwise pass against nothing at all.
-    if (!p.startsWith(ctx.ws + path.sep) && p !== ctx.ws) throw new Error(`source path "${rel}" escapes the run workspace`);
+    if (!within(ctx.ws, p)) throw new Error(`source path "${rel}" escapes the run workspace`);
     try { return await readText(p); } catch (e) { throw new Error(`source file "${rel}" could not be read: ${(e as Error).message}`); }
   }
   return ctx.trace.finalText;
+}
+
+// Containment by relative path — a string prefix would accept a sibling like `<root>-2`.
+export function within(root: string, target: string): boolean {
+  const r = path.relative(root, target);
+  return target === root || (!!r && !r.startsWith('..') && !path.isAbsolute(r));
 }
 
 const globToRe = (g: string): RegExp =>
@@ -81,15 +88,19 @@ export async function grade(g: Grader, ctx: GradeContext): Promise<GraderVerdict
       const pattern = String(g.fm.pattern ?? g.body);
       const flags = String(g.fm.flags ?? 'i');
       const text = await sourceText(g, ctx);
-      const re = new RegExp(pattern, flags);
-      const matches = text.match(new RegExp(pattern, flags.includes('g') ? flags : flags + 'g')) ?? [];
+      // Count once, decide from the count: a regex carrying `g` keeps lastIndex between
+      // .test() calls, so testing twice used to answer two different questions.
+      const global = flags.includes('g') ? flags : `${flags}g`;
+      const matches = text.match(new RegExp(pattern, global)) ?? [];
+      const found = matches.length > 0;
       const match = String(g.fm.match ?? 'contains');
-      if (match === 'not_contains') return v(!re.test(text), re.test(text) ? `matched ${matches.length}×, expected none` : 'no match, as required');
+      if (match === 'not_contains') return v(!found, found ? `matched ${matches.length}×, expected none` : 'no match, as required');
       if (match.startsWith('count:')) {
         const want = Number(match.slice(6));
+        if (!Number.isInteger(want) || want < 0) return v(false, `match: "${match}" — expected count:<non-negative integer>`);
         return v(matches.length === want, `${matches.length} match(es), expected ${want}`);
       }
-      return v(re.test(text), re.test(text) ? `matched: ${String(matches[0] ?? '').slice(0, 80)}` : `no match for /${pattern}/`);
+      return v(found, found ? `matched: ${String(matches[0] ?? '').slice(0, 80)}` : `no match for /${pattern}/`);
     }
 
     if (g.type === 'tool_used') {
@@ -128,6 +139,9 @@ export async function grade(g: Grader, ctx: GradeContext): Promise<GraderVerdict
       if (g.type === 'baseline') {
         const bf = String(g.fm.baseline_file ?? '');
         const bp = path.resolve(path.dirname(g.file), bf);
+        // The baseline is embedded in the judge prompt and sent to a model: a grader from a
+        // third-party skill must not be able to name ../../.ssh/id_rsa as its "reference".
+        if (!within(path.dirname(g.file), bp)) return v(false, `baseline_file "${bf}" escapes the case directory`);
         const baseline = await readText(bp).catch((e: Error) => { throw new Error(`baseline_file "${bf}" could not be read: ${e.message}`); });
         material = `## BASELINE (the reference)\n${baseline.slice(0, 20000)}\n\n## CANDIDATE (this run)\n${material.slice(0, 20000)}`;
       }
@@ -154,8 +168,17 @@ async function judge(g: Grader, criteria: string, material: string, ctx: GradeCo
     '',
     'Reply with ONE line of JSON and nothing else: {"pass": true|false, "why": "<20 words>"}',
   ].join('\n');
-  const r = await run('claude', ['-p', prompt, '--model', ctx.judgeModel, '--output-format', 'json', '--max-turns', '1', '--permission-mode', 'dontAsk', '--setting-sources', 'project'],
-    { cwd: ctx.ws, env: { ...process.env, NO_COLOR: '1' }, maxBuffer: 8 * 1024 * 1024 }).catch((e: Error & { stdout?: string }) => ({ stdout: e.stdout ?? '', stderr: e.message }));
+  let r: { stdout: string };
+  try {
+    r = await run('claude', ['-p', prompt, '--model', ctx.judgeModel, '--output-format', 'json', '--max-turns', '1', '--permission-mode', 'dontAsk', '--setting-sources', 'project'],
+      { cwd: ctx.ws, env: { ...process.env, NO_COLOR: '1' }, maxBuffer: 8 * 1024 * 1024, timeout: JUDGE_TIMEOUT_MS, killSignal: 'SIGKILL' });
+  } catch (e) {
+    const err = e as Error & { stdout?: string; code?: string };
+    // "the judge could not run" is not "the run failed the criteria" — say which.
+    if (err.code === 'ENOENT') return { name: g.name, type: g.type, pass: false, detail: 'judge unavailable: the `claude` CLI is not on PATH (llm and baseline graders need it)' };
+    if (!err.stdout) return { name: g.name, type: g.type, pass: false, detail: `judge unavailable: ${err.message.slice(0, 140)}` };
+    r = { stdout: err.stdout };
+  }
   let cost: number | undefined;
   let text = '';
   try { const j = JSON.parse(r.stdout); text = String(j.result ?? ''); cost = typeof j.total_cost_usd === 'number' ? j.total_cost_usd : undefined; }

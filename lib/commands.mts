@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { loadHarnesses } from './caps.mts';
 import { costOf, estimateTokens, overBudget } from './cost.mts';
 import { lintArtifact, matrix, sortDiags, toSarif } from './lint.mts';
-import { discover, loadAgent } from './skill.mts';
+import { discoverDetailed, loadAgent } from './skill.mts';
 import { buildRegistry } from './tools.mts';
 import { scan } from './scan.mts';
 import { readUsage, usageFor, type UsageData } from './usage.mts';
@@ -71,15 +71,16 @@ async function budgetsFor(targets: string[], opts: Opts): Promise<Budgets> {
   return {};
 }
 
-export interface Loaded { artifacts: Artifact[]; harnesses: HarnessCaps[]; registry: ToolRegistry; agentsByName: Map<string, AgentArtifact>; taut: TautContext | null; tautFindings: Diagnostic[]; note: string | null }
+export interface Loaded { artifacts: Artifact[]; harnesses: HarnessCaps[]; registry: ToolRegistry; agentsByName: Map<string, AgentArtifact>; taut: TautContext | null; tautFindings: Diagnostic[]; note: string | null; ignored: string[] }
 
 export async function load(targets: string[], opts: Opts): Promise<Loaded> {
   if (!targets.length) targets = ['.'];
-  let artifacts = await discover(targets);
+  const found = await discoverDetailed(targets);
+  let artifacts = found.artifacts;
   const harnesses = await selectHarnesses(opts);
   let taut: TautContext | null = null;
   let note: string | null = null;
-  const tautFindings: Diagnostic[] = [];
+  const tautFindings: Diagnostic[] = [...found.failures];
   if (!opts.noTaut) {
     const det = await detectTaut(targets, { taut: opts.taut ?? null, deployment: opts.deployment ?? null });
     taut = det.ctx; note = det.note;
@@ -100,12 +101,12 @@ export async function load(targets: string[], opts: Opts): Promise<Loaded> {
   for (const a of artifacts) if (a.kind === 'agent') agentsByName.set(a.name, a);
   // a TAUT pack's agents live in the catalog even when the target was one skill dir
   if (taut) for (const [name, entry] of taut.catalog.agents) if (!agentsByName.has(name)) agentsByName.set(name, (await refine(await loadAgent(entry.path), taut)).artifact as AgentArtifact);
-  return { artifacts, harnesses, registry, agentsByName, taut, tautFindings, note };
+  return { artifacts, harnesses, registry, agentsByName, taut, tautFindings, note, ignored: found.ignored };
 }
 
 // ---- lint ---------------------------------------------------------------------------
-export async function runLint(targets: string[], opts: Opts): Promise<{ diagnostics: Diagnostic[]; artifacts: Artifact[]; harnesses: HarnessCaps[]; taut: TautContext | null; note: string | null; scanNote?: string | null; scanners?: string[] }> {
-  const { artifacts, harnesses, registry, agentsByName, taut, tautFindings, note } = await load(targets, opts);
+export async function runLint(targets: string[], opts: Opts): Promise<{ diagnostics: Diagnostic[]; artifacts: Artifact[]; harnesses: HarnessCaps[]; taut: TautContext | null; note: string | null; ignored: string[]; scanNote?: string | null; scanners?: string[] }> {
+  const { artifacts, harnesses, registry, agentsByName, taut, tautFindings, note, ignored } = await load(targets, opts);
   const diagnostics: Diagnostic[] = [...tautFindings];
   for (const a of artifacts) {
     let ds = lintArtifact(a, { harnesses, registry, agentsByName });
@@ -124,19 +125,21 @@ export async function runLint(targets: string[], opts: Opts): Promise<{ diagnost
     diagnostics.push(...r.diagnostics);
     scanNote = r.note; scanners = r.ran;
   }
-  return { diagnostics: sortDiags(diagnostics), artifacts, harnesses, taut, note, scanNote, scanners };
+  return { diagnostics: sortDiags(diagnostics), artifacts, harnesses, taut, note, ignored, scanNote, scanners };
 }
 
 export async function cmdLint(opts: Opts): Promise<number> {
-  const { diagnostics, artifacts, harnesses, taut, note, scanNote, scanners } = await runLint(opts._, opts);
+  const { diagnostics, artifacts, harnesses, taut, note, ignored, scanNote, scanners } = await runLint(opts._, opts);
   // one verdict for every output format — a CI job that adds --json must not stop catching
   // "the target matched nothing"
   const exit = !artifacts.length ? 1
     : diagnostics.some((x) => x.severity === 'high') || (opts.strict && diagnostics.some((x) => x.severity === 'medium')) ? 1 : 0;
-  if (opts.sarif) { process.stdout.write(JSON.stringify(toSarif(diagnostics, VERSION), null, 2) + '\n'); }
-  else if (opts.json) { process.stdout.write(JSON.stringify({ version: VERSION, artifacts: artifacts.map((a) => ({ kind: a.kind, name: a.name, path: a.path })), diagnostics }, null, 2) + '\n'); }
+  if (opts.sarif) { process.stdout.write(JSON.stringify(toSarif(diagnostics, VERSION, path.resolve(opts._[0] ?? '.')), null, 2) + '\n'); }
+  else if (opts.json) { process.stdout.write(JSON.stringify({ version: VERSION, artifacts: artifacts.map((a) => ({ kind: a.kind, name: a.name, path: a.path })), ignored, diagnostics }, null, 2) + '\n'); }
   else {
     if (!artifacts.length) process.stdout.write('no skills or agents found\n');
+    // a target that is not a skill, an agent or a directory was silently dropped before
+    for (const p of ignored) process.stdout.write(c.yellow(`ignored ${rel(p)} — not a SKILL.md, an agent .md, or a directory\n`));
     if (taut) process.stdout.write(c.dim(`TAUT pack ${rel(taut.packRoot)} · engine ${rel(taut.engine)}${taut.engineCommit ? ` @${taut.engineCommit}` : ''}${taut.project ? ` · deployment ${taut.project.name}` : ''} — engine-parsed frontmatter, wiring checked against the catalog\n`));
     else if (note) process.stdout.write(c.dim(note + '\n'));
     if (scanners?.length) process.stdout.write(c.dim(`content scan: ${scanners.join(', ')}\n`));

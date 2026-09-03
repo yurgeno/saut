@@ -5,10 +5,19 @@
 import path from 'node:path';
 import { parseFrontmatter, bodyOf } from '../frontmatter.mts';
 import type { Artifact } from '../types.mts';
-import { exists, readText, walk } from '../util.mts';
+import { exists, fail, readText, walk } from '../util.mts';
 import type { BenchCase } from './types.mts';
 
 const CONTROL_PROMPT = 'Reply with the single word PONG and nothing else.';
+
+// A number from a spec file gets the same treatment as a CLI flag: out of range or not a
+// number at all is a loud failure, never a NaN that silently zeroes every timeout.
+function num(v: unknown, fallback: number, min: number, max: number, what: string): number {
+  if (v === undefined || v === null) return fallback;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < min || n > max) fail(`${what}: expected a number in ${min}..${max}, got ${JSON.stringify(v)}`);
+  return n;
+}
 
 export async function loadCases(a: Artifact, filter?: string): Promise<BenchCase[]> {
   const dir = a.kind === 'skill' ? path.join(a.dir, 'evals') : path.join(path.dirname(a.path), 'evals', a.name);
@@ -19,6 +28,7 @@ export async function loadCases(a: Artifact, filter?: string): Promise<BenchCase
   if (await exists(specFile)) {
     try {
       const j = JSON.parse(await readText(specFile)) as { evals?: any[] };
+      if (!Array.isArray(j?.evals)) fail(`${specFile}: expected an "evals" array`);
       for (const e of j.evals ?? []) {
         out.push({
           name: String(e.name ?? e.id ?? `spec-${out.length + 1}`),
@@ -27,14 +37,18 @@ export async function loadCases(a: Artifact, filter?: string): Promise<BenchCase
           invocation: 'implicit',
           expect: 'fire',
           tags: ['evals.json'],
-          maxTurns: Number(e.max_turns ?? 8),
-          timeoutSeconds: Number(e.timeout_seconds ?? 300),
+          maxTurns: num(e.max_turns, 8, 1, 200, `${specFile}: max_turns`),
+          timeoutSeconds: num(e.timeout_seconds, 300, 1, 86400, `${specFile}: timeout_seconds`),
           file: specFile,
           assertions: (Array.isArray(e.assertions) ? e.assertions : []).map((x: any) =>
             (typeof x === 'string' ? { kind: 'contains', value: x } : { kind: String(x.type ?? 'contains'), value: String(x.value ?? x.text ?? '') })),
         });
       }
-    } catch { /* a malformed spec file is reported by the run as zero cases */ }
+    } catch (e) {
+      // Silently falling back to generated cases would report a green matrix for a suite
+      // that never ran — name the file and the reason instead.
+      fail(`${specFile} could not be read as an eval suite: ${(e as Error).message}`);
+    }
   }
   if (await exists(dir)) {
     for await (const f of walk(dir)) {
@@ -50,8 +64,8 @@ export async function loadCases(a: Artifact, filter?: string): Promise<BenchCase
         invocation: d.invocation === 'explicit' || d.invocation === 'control' ? d.invocation : 'implicit',
         expect: d.expect === 'no-fire' ? 'no-fire' : 'fire',
         tags: Array.isArray(d.tags) ? d.tags.map(String) : [],
-        maxTurns: typeof d.max_turns === 'number' ? d.max_turns : 8,
-        timeoutSeconds: typeof d.timeout_seconds === 'number' ? d.timeout_seconds : 300,
+        maxTurns: num(d.max_turns, 8, 1, 200, `${f}: max_turns`),
+        timeoutSeconds: num(d.timeout_seconds, 300, 1, 86400, `${f}: timeout_seconds`),
         model: typeof d.model === 'string' ? d.model : undefined,
         file: f,
       });
