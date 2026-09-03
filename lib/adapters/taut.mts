@@ -10,7 +10,7 @@
 //   • each artifact gets its COMPILE PREVIEW per harness from `taut render` (exact bytes the
 //     installer writes, target path, the adapter's recorded degradations);
 //   • the engine's degradation records replace SAUT's registry rows in the matrix.
-// Engine location: --taut <dir> | SAUT_TAUT_ENGINE | ~/taut | ~/federation.
+// Engine location: --taut <dir> | SAUT_TAUT_ENGINE | ~/taut.
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -29,7 +29,7 @@ export interface TautContext {
   projects: { name: string; dir: string }[];
   project: { name: string; dir: string; manifest: any; repos: { mandatory?: string[]; known?: Record<string, unknown> } | null } | null;
   harnessIds: string[];
-  caps: Record<string, { skillsDir: string; agentsDir: string; skillAllowlist: string; agentAllowlist: string; degradations: { id: string; text: string }[] }>;
+  caps: Record<string, { skillsDir: string; agentsDir: string; agentFormat: 'md' | 'toml'; skillAllowlist: string; agentAllowlist: string; degradations: { id: string; text: string }[] }>;
   catalog: { skills: Map<string, { path: string; origin: string; description: string; meta: any }>; agents: Map<string, { path: string }> };
   mcp: Record<string, { role?: string; serverKey?: string; tools?: string[] }>;
   // engine modules (typed loosely on purpose: the engine is a moving dependency)
@@ -62,7 +62,7 @@ async function hasProject(dir: string): Promise<boolean> {
 }
 
 export async function findEngine(explicit?: string | null): Promise<string | null> {
-  const cands = [explicit, process.env.SAUT_TAUT_ENGINE, path.join(os.homedir(), 'taut'), path.join(os.homedir(), 'federation')].filter(Boolean) as string[];
+  const cands = [explicit, process.env.SAUT_TAUT_ENGINE, path.join(os.homedir(), 'taut')].filter(Boolean) as string[];
   for (const c of cands) if (await exists(path.join(c, 'lib', 'commands.mts')) && await exists(path.join(c, 'taut.mjs'))) return path.resolve(c);
   return null;
 }

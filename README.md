@@ -19,6 +19,7 @@ saut lint  <skills or agents…>   privilege / correctness findings + per-harnes
 saut cost  <skills or agents…>   always-on vs on-invoke token passport, budgets
 saut passport <…>                lint + cost + harness matrix (+ compiled previews) as one JSON
 saut preview <name> [dir]        TAUT packs: the compiled bytes of one artifact per harness
+saut test  <skill or agent>      the bench: compile → does it trigger → does it obey the allowlist
 saut harnesses                   what each harness enforces, degrades, and lists
 saut tools [dir] [--live]        the tool names an allowlist may cite (builtin + MCP catalog)
 ```
@@ -113,7 +114,7 @@ A [TAUT](https://github.com/yurgeno/taut) data pack is detected by shape (`pack.
 `skills/` or `<project>/deployment.json`). Without an engine it lints as plain skills —
 capability-marker branches (`# kaut:on` … `# kaut:off`) are read as the *union* of
 allowlists and the first description. With an engine reachable (`--taut <dir>`,
-`$SAUT_TAUT_ENGINE`, `~/taut`, `~/federation`; engine commit `3e00050` or later, which
+`$SAUT_TAUT_ENGINE`, `~/taut`; engine commit `3e00050` or later, which
 ships the `render` verb and the harness capability registry), the adapter switches on:
 
 - skill frontmatter is parsed by the **engine's** parser — the strict subset that decides
@@ -138,15 +139,39 @@ Pack CI: `tools/validate-pack.sh` in the TAUT packs runs `saut lint` after the c
 `SAUT` points at a checkout (`SAUT=~/saut tools/validate-pack.sh`); `SAUT_STRICT=1` turns
 its findings into a failing step.
 
+## The bench
+
+`saut test` answers the three questions a lint cannot: does the artifact land where the
+harness looks (L1), does the harness actually fire it — and not fire on an unrelated prompt
+(L2), and does the run stay inside the declared allowlist (L3). Everything happens in a
+scratch workspace; for a TAUT pack the engine compiles it there first, so the bench runs the
+real installed artifact with its gate live.
+
+```
+matrix skill dev-review · taut · L3
+  L1 compile   ok compiled by taut @21df2ff (claude-code+codex, 1 stub repos)
+  claude-code  trigger 100% · control clean · obedience inside allowlist · 2 denied [grant]
+    explicit   ok      fired=expansion tools=Read,Bash,Bash,Bash
+    implicit   ok      fired=tool      tools=Skill,Read,Glob
+    control    ok      fired=none      tools=—
+    caveat: 24 other skills were installed for this session — implicit triggering competes with them
+  codex        trigger 100% · control clean · obedience inside allowlist [prose]
+```
+
+Two states carry most of the value: **`lost to <skill>`** (the implicit prompt fired a
+*different* skill — the description lost a routing contest) and **outside allowlist** (a call
+ran that the declaration never covered; on Codex and opencode that is the recorded
+degradation, measured rather than asserted). Full detail, isolation and cost controls:
+[docs/BENCH.md](docs/BENCH.md).
+
 ## Roadmap
 
 - **P0** ✓ — core: parser + emitter, harness registry, tool registry (+ live), `lint`, `cost`,
   `passport`.
 - **P1** ✓ — TAUT adapter: engine-parsed frontmatter, wiring checked against the catalog,
   compile preview + degradations from the engine (`taut render`), `saut lint` in pack CI.
-- **P2** — test bench: compile into a scratch workspace and run each harness headlessly —
-  *does the skill trigger* (with/without ablation), *does the run stay inside the allowlist*
-  (the obedience matrix — on Codex/OpenCode this measures the degradation), neutral trace.
+- **P2** ✓ — the bench: `saut test` L1 compile · L2 trigger (explicit / implicit / control,
+  with the lost-to diagnostic) · L3 obedience, across Claude Code, Codex and opencode.
 - **P3** — Studio: a loopback UI over the same verbs (form + editor, passport, run button).
 - **P4** — scenario graders (Claude Code `plugin eval` case format + agentskills `evals.json`),
   `--scan` via an installed security scanner, usage from TAUT telemetry.
@@ -159,7 +184,9 @@ npm test             # tsc --noEmit && node --test
 ```
 
 `lib/*.mts` is the core (typechecked), `saut.mjs` the plain-JS shell, `test/*.test.mjs` the
-behavioral suite over `test/fixtures/pack` (one artifact per rule).
+behavioral suite over `test/fixtures/pack` (one artifact per rule). The bench suite runs
+offline against fake harness binaries (`test/fixtures/fake-harness.mjs`) — no model calls, no
+cost; live runs are exercised by hand.
 
 ## License
 
