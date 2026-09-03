@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Artifact, HarnessCaps } from '../types.mts';
-import type { BenchCase, ToolCall, Trace, Usage } from './types.mts';
+import type { BenchCase, ToolCall, Trace } from './types.mts';
 
 export interface RunSpec {
   harness: HarnessCaps;
@@ -55,7 +55,7 @@ function spawnCollect(cmd: string, args: string[], cwd: string, timeoutMs: numbe
   });
 }
 
-const digestOf = (name: string, input: unknown): string => {
+const digestOf = (_name: string, input: unknown): string => {
   const i = (input ?? {}) as Record<string, unknown>;
   const pick = i.command ?? i.file_path ?? i.path ?? i.skill ?? i.name ?? i.pattern ?? i.url ?? i.query ?? '';
   return String(pick).replace(/\s+/g, ' ').slice(0, 120);

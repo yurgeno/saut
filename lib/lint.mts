@@ -4,7 +4,7 @@
 //
 // No score. A finding is a finding; the per-harness `enforcement` column says whether the
 // declared allowlist is a restriction, a grant, prose, or dropped on that harness.
-import type { AgentArtifact, Artifact, Diagnostic, HarnessCaps, SkillArtifact, ToolRef, ToolRegistry } from './types.mts';
+import type { AgentArtifact, Artifact, Diagnostic, HarnessCaps, ToolRef, ToolRegistry } from './types.mts';
 import { bodyToolMentions } from './skill.mts';
 import { classifyTool } from './tools.mts';
 

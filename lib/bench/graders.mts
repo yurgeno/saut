@@ -8,11 +8,10 @@
 // Data sources: last_message (default) · trace · files · {source: file, path: …}.
 // A case scores pass/total; the run's score is the mean over its graders.
 import { execFile } from 'node:child_process';
-import fs from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { parseFrontmatter, bodyOf } from '../frontmatter.mts';
-import { exists, walk } from '../util.mts';
+import { exists, readText, walk } from '../util.mts';
 import type { Trace } from './types.mts';
 
 const run = promisify(execFile);
@@ -34,7 +33,7 @@ export async function loadGraders(caseFile: string | undefined): Promise<Grader[
   const out: Grader[] = [];
   for await (const f of walk(dir, 2)) {
     if (!f.endsWith('.md')) continue;
-    const text = await fs.readFile(f, 'utf8');
+    const text = await readText(f);
     const fm = parseFrontmatter(text, f);
     const t = String(fm.data.type ?? '');
     out.push({
@@ -57,14 +56,14 @@ async function sourceText(g: Grader, ctx: GradeContext): Promise<string> {
     const parts: string[] = [];
     for await (const f of walk(ctx.ws, 4)) {
       if (/\/(\.git|\.claude|\.agents|\.codex|\.opencode|\.taut)\//.test(f)) continue;
-      try { parts.push(`# ${path.relative(ctx.ws, f)}\n${(await fs.readFile(f, 'utf8')).slice(0, 20000)}`); } catch { /* binary */ }
+      try { parts.push(`# ${path.relative(ctx.ws, f)}\n${(await readText(f)).slice(0, 20000)}`); } catch { /* binary or oversized */ }
     }
     return parts.join('\n\n');
   }
   if (typeof src === 'object' && src && (src as any).source === 'file') {
     const p = path.resolve(ctx.ws, String((src as any).path ?? ''));
     if (!p.startsWith(ctx.ws)) return '';
-    try { return await fs.readFile(p, 'utf8'); } catch { return ''; }
+    try { return await readText(p); } catch { return ''; }
   }
   return ctx.trace.finalText;
 }
@@ -126,7 +125,7 @@ export async function grade(g: Grader, ctx: GradeContext): Promise<GraderVerdict
       if (g.type === 'baseline') {
         const bf = String(g.fm.baseline_file ?? '');
         const bp = path.resolve(path.dirname(g.file), bf);
-        const baseline = await fs.readFile(bp, 'utf8').catch(() => '');
+        const baseline = await readText(bp).catch(() => '');
         material = `## BASELINE (the reference)\n${baseline.slice(0, 20000)}\n\n## CANDIDATE (this run)\n${material.slice(0, 20000)}`;
       }
       return await judge(g, criteria, material, ctx);

@@ -9,7 +9,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { loadHarnesses } from './caps.mts';
 import type { ToolCatalogServer, ToolRef, ToolRegistry } from './types.mts';
-import { exists } from './util.mts';
+import { exists, readText } from './util.mts';
 
 interface CatalogServer { serverKey?: string; role?: string; tools?: string[]; command?: string; args?: string[]; env?: string[]; fixedEnv?: Record<string, string> }
 interface Catalog { servers?: Record<string, CatalogServer>; mcpServers?: Record<string, CatalogServer> }
@@ -38,7 +38,7 @@ export async function findCatalog(start: string): Promise<string | null> {
 }
 
 export async function readCatalog(file: string): Promise<{ servers: ToolCatalogServer[]; raw: Record<string, CatalogServer> }> {
-  const j = JSON.parse(await fs.readFile(file, 'utf8')) as Catalog;
+  const j = JSON.parse(await readText(file)) as Catalog;
   const raw = j.servers ?? j.mcpServers ?? {};
   const servers: ToolCatalogServer[] = Object.entries(raw).map(([id, s]) => ({
     serverKey: s.serverKey ?? id,

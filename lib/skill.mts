@@ -5,11 +5,10 @@
 // `name:` + `description:` frontmatter under an `agents/` directory (or `.claude/agents`,
 // `.opencode/agents`) is an agent. TAUT packs (`skills/`, `<project>/skills/`, `agents/`)
 // fall out of the same walk without a special case.
-import fs from 'node:fs/promises';
 import path from 'node:path';
 import { parseFrontmatter, bodyOf } from './frontmatter.mts';
 import type { AgentArtifact, Artifact, SkillArtifact, ToolRef } from './types.mts';
-import { exists, isDir, walk } from './util.mts';
+import { exists, isDir, readText, walk } from './util.mts';
 
 const AGENT_DIRS = new Set(['agents', '.claude/agents', '.opencode/agents']);
 
@@ -61,7 +60,7 @@ function str(v: unknown): string | null {
 }
 
 export async function loadSkill(file: string): Promise<SkillArtifact> {
-  const text = await fs.readFile(file, 'utf8');
+  const text = await readText(file);
   const fm = parseFrontmatter(text, file);
   const d = fm.data;
   const dir = path.dirname(file);
@@ -85,7 +84,7 @@ export async function loadSkill(file: string): Promise<SkillArtifact> {
 }
 
 export async function loadAgent(file: string): Promise<AgentArtifact> {
-  const text = await fs.readFile(file, 'utf8');
+  const text = await readText(file);
   const fm = parseFrontmatter(text, file);
   const d = fm.data;
   return {

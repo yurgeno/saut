@@ -25,9 +25,8 @@ import type { BenchResult } from '../bench/types.mts';
 import { costOf, overBudget } from '../cost.mts';
 import { emitFrontmatter } from '../frontmatter.mts';
 import { lintArtifact, matrix, sortDiags } from '../lint.mts';
-import { discover, loadAgent, loadSkill } from '../skill.mts';
-import type { AgentArtifact, Artifact, Diagnostic } from '../types.mts';
-import { exists, isDir } from '../util.mts';
+import type { Artifact, Diagnostic } from '../types.mts';
+import { exists, readText } from '../util.mts';
 import { previews } from '../adapters/taut.mts';
 import { load, type Opts } from '../commands.mts';
 
@@ -37,6 +36,14 @@ const PAGE = readFileSync(path.join(HERE, 'studio.html'), 'utf8');
 const renderPage = (token: string): string => PAGE.replace('%%TOKEN%%', token);
 
 const NAME = /^[a-z0-9][a-z0-9-]*$/;                       // skill/agent id (spec shape)
+const MAX_JOBS = 32;                                       // completed bench runs kept for replay
+
+// Constant-time compare so a token cannot be recovered byte by byte from response timing.
+// Lengths differ → reject without comparing (the length is not a secret).
+function tokenOk(given: unknown, token: string): boolean {
+  if (typeof given !== 'string' || given.length !== token.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(given), Buffer.from(token));
+}
 
 export interface StudioHandle { server: Server; token: string; port: number; close: () => Promise<void> }
 
@@ -89,7 +96,7 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
     const compiled = taut ? (await previews(a, taut)).map((p) => ({ harness: p.harness, id: p.id, bytes: p.bytes, transform: p.transform, degradations: p.degradations, content: p.content.slice(0, 200000) })) : [];
     return {
       kind: a.kind, name: a.name, path: a.path,
-      text: await fs.readFile(a.path, 'utf8'),
+      text: await readText(a.path),
       frontmatter: a.fm.data, duplicates: a.fm.duplicates,
       findings: sortDiags(findings), cost, over: overBudget(cost, a, {}), matrix: matrix(a, harnesses), compiled,
     };
@@ -157,6 +164,14 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
     const id = crypto.randomBytes(6).toString('hex');
     const job: BenchJob = { id, events: [], done: false, listeners: new Set() };
     jobs.set(id, job);
+    // keep the last MAX_JOBS runs for replay; evict the oldest FINISHED ones (a running job
+    // is never dropped — its stream would end without a verdict)
+    if (jobs.size > MAX_JOBS) {
+      for (const [key, j] of jobs) {
+        if (jobs.size <= MAX_JOBS) break;
+        if (j.done && !j.listeners.size) jobs.delete(key);
+      }
+    }
     const push = (e: { kind: string; text: string }) => { job.events.push(e); for (const l of job.listeners) l(e); };
     const siblings = taut ? (await load([taut.packRoot], opts)).artifacts : artifacts;
     const outDir = path.join(a.kind === 'skill' ? a.dir : path.dirname(a.path), 'evals', 'results', new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19));
@@ -190,7 +205,7 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
       if (req.method === 'GET' && pathname.startsWith('/api/test/') && pathname.endsWith('/events')) {
         // SSE: the token rides in the query (EventSource cannot set headers); the Host guard
         // above and the loopback bind keep it local, and the stream is read-only.
-        if (url.searchParams.get('token') !== token) return send(403, { error: 'bad token' });
+        if (!tokenOk(url.searchParams.get('token'), token)) return send(403, { error: 'bad token' });
         const job = jobs.get(pathname.split('/')[3]);
         if (!job) return send(404, { error: 'no such run' });
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive', 'x-content-type-options': 'nosniff' });
@@ -206,7 +221,7 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
       }
 
       if (req.method === 'POST') {
-        if (req.headers['x-saut-token'] !== token) return send(403, { error: 'bad or missing token' });
+        if (!tokenOk(req.headers['x-saut-token'], token)) return send(403, { error: 'bad or missing token' });
         const origin = req.headers.origin;
         if (origin && origin !== `http://127.0.0.1:${boundPort}` && origin !== `http://localhost:${boundPort}`) return send(403, { error: 'bad origin' });
         let body = '';

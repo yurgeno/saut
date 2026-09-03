@@ -2,11 +2,10 @@
 // frontmatter; graders/*.md are for the scenario level, ignored here) or auto-generated
 // when a skill ships none. SAUT reads two extra frontmatter keys: `expect: fire|no-fire`
 // (default fire) and `invocation: explicit|implicit|control` (default implicit).
-import fs from 'node:fs/promises';
 import path from 'node:path';
 import { parseFrontmatter, bodyOf } from '../frontmatter.mts';
 import type { Artifact } from '../types.mts';
-import { exists, walk } from '../util.mts';
+import { exists, readText, walk } from '../util.mts';
 import type { BenchCase } from './types.mts';
 
 const CONTROL_PROMPT = 'Reply with the single word PONG and nothing else.';
@@ -19,7 +18,7 @@ export async function loadCases(a: Artifact, filter?: string): Promise<BenchCase
   const specFile = path.join(dir, 'evals.json');
   if (await exists(specFile)) {
     try {
-      const j = JSON.parse(await fs.readFile(specFile, 'utf8')) as { evals?: any[] };
+      const j = JSON.parse(await readText(specFile)) as { evals?: any[] };
       for (const e of j.evals ?? []) {
         out.push({
           name: String(e.name ?? e.id ?? `spec-${out.length + 1}`),
@@ -40,7 +39,7 @@ export async function loadCases(a: Artifact, filter?: string): Promise<BenchCase
   if (await exists(dir)) {
     for await (const f of walk(dir)) {
       if (path.basename(f) !== 'prompt.md') continue;
-      const text = await fs.readFile(f, 'utf8');
+      const text = await readText(f);
       const fm = parseFrontmatter(text, f);
       const d = fm.data;
       const name = typeof d.name === 'string' ? d.name : path.basename(path.dirname(f));

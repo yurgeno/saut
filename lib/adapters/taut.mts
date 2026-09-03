@@ -18,7 +18,7 @@ import { pathToFileURL } from 'node:url';
 import { parseFrontmatter } from '../frontmatter.mts';
 import { toolList } from '../skill.mts';
 import type { Artifact, Diagnostic, SkillArtifact, ToolCatalogServer } from '../types.mts';
-import { exists, isDir } from '../util.mts';
+import { exists, isDir, readText } from '../util.mts';
 
 export interface TautPreview { harness: string; id: string; bytes: number; content: string; transform: string; degradations: { id: string; text: string }[] }
 
@@ -125,7 +125,7 @@ export function catalogServers(ctx: TautContext): ToolCatalogServer[] {
 // generic parse stays as fallback when the engine refuses the source (that refusal is
 // itself a finding: the pack will not compile).
 export async function refine(a: Artifact, ctx: TautContext): Promise<{ artifact: Artifact; findings: Diagnostic[] }> {
-  const raw = await fs.readFile(a.path, 'utf8');
+  const raw = await readText(a.path);
   const rel = path.relative(ctx.packRoot, a.path);
   const findings: Diagnostic[] = [];
   let on: string; let off: string;

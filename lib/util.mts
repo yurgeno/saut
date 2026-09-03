@@ -8,8 +8,16 @@ export function fail(msg: string): never { throw new SautError(msg); }
 
 export const exists = (p: string) => fs.access(p).then(() => true, () => false);
 
-export async function readText(p: string): Promise<string> {
-  return fs.readFile(p, 'utf8');
+// Every read of a file SAUT did not write goes through here: a skill body, a referenced
+// file, a grader source. 8 MB is far above any legitimate artifact and far below trouble.
+export const MAX_READ_BYTES = 8 * 1024 * 1024;
+export async function readText(p: string, max = MAX_READ_BYTES): Promise<string> {
+  const h = await fs.open(p, 'r');
+  try {
+    const { size } = await h.stat();
+    if (size > max) throw new SautError(`${p} is ${(size / 1048576).toFixed(1)} MB — refusing to read more than ${max / 1048576} MB`);
+    return (await h.readFile({ encoding: 'utf8' })) as string;
+  } finally { await h.close(); }
 }
 
 export async function readJson<T = unknown>(p: string): Promise<T> {

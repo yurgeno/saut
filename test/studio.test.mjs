@@ -143,6 +143,27 @@ test('POST /api/test + SSE: L1 streams events and ends with the matrix', async (
   assert.equal(missing.status, 404);
 });
 
+test('the token is compared in constant time and finished runs are evicted', async () => {
+  // a wrong token of the RIGHT length must not be distinguishable by shape of failure
+  const same = await fetch(base + '/api/save', { method: 'POST', headers: { 'content-type': 'application/json', 'x-saut-token': 'f'.repeat(studio.token.length) }, body: '{}' });
+  assert.equal(same.status, 403);
+  const short = await fetch(base + '/api/save', { method: 'POST', headers: { 'content-type': 'application/json', 'x-saut-token': 'f' }, body: '{}' });
+  assert.equal(short.status, 403, 'a wrong length is refused without comparing');
+  // the jobs map is bounded: 40 finished L1 runs must not accumulate
+  const ids = [];
+  for (let i = 0; i < 40; i++) {
+    const { id } = await (await post('/api/test', { path: path.join(root, 'skills', 'fx-clean', 'SKILL.md'), level: 1, harnesses: [] })).json();
+    ids.push(id);
+    const res = await get(`/api/test/${id}/events?token=${studio.token}`);
+    for await (const chunk of res.body) if (Buffer.from(chunk).toString().includes('event: end')) break;
+  }
+  const oldest = await get(`/api/test/${ids[0]}/events?token=${studio.token}`);
+  assert.equal(oldest.status, 404, 'the oldest finished run was evicted');
+  const newest = await get(`/api/test/${ids.at(-1)}/events?token=${studio.token}`);
+  assert.equal(newest.status, 200, 'recent runs are still replayable');
+  newest.body.cancel();
+});
+
 test('unknown routes 404 and a broken payload never takes the server down', async () => {
   assert.equal((await get('/api/nope')).status, 404);
   const r = await fetch(base + '/api/save', { method: 'POST', headers: { 'x-saut-token': studio.token }, body: 'not json' });

@@ -8,7 +8,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Artifact, Budgets, CostLine, HarnessCaps } from './types.mts';
-import { exists } from './util.mts';
+import { exists, readText } from './util.mts';
 
 // Heuristic tokenizer: words ≈ 1 token per ~4.5 letters (min 1), digits ≈ 1 per 3,
 // every punctuation/symbol char ≈ 1, whitespace free. On English markdown this lands
@@ -85,7 +85,7 @@ export async function costOf(
     }
   }
   for (const f of await referencedFiles(a)) {
-    const text = await fs.readFile(f, 'utf8');
+    const text = await readText(f);
     transitive.push({ name: path.relative(a.kind === 'skill' ? a.dir : path.dirname(a.path), f), tokens: await count(text) });
   }
   return {

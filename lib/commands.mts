@@ -15,7 +15,7 @@ import { runBench } from './bench/bench.mts';
 import { startStudio } from './studio/server.mts';
 import type { BenchResult } from './bench/types.mts';
 import type { AgentArtifact, Artifact, Budgets, CostLine, Diagnostic, HarnessCaps, ToolRegistry } from './types.mts';
-import { c, count, exists, isDir, rel } from './util.mts';
+import { c, count, exists, isDir, readText, rel } from './util.mts';
 
 export const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 export const VERSION: string = JSON.parse(await fs.readFile(path.join(ROOT, 'package.json'), 'utf8')).version;
@@ -60,12 +60,12 @@ async function selectHarnesses(opts: Opts): Promise<HarnessCaps[]> {
 }
 
 async function budgetsFor(targets: string[], opts: Opts): Promise<Budgets> {
-  if (opts.budget) return JSON.parse(await fs.readFile(opts.budget, 'utf8')) as Budgets;
+  if (opts.budget) return JSON.parse(await readText(opts.budget)) as Budgets;
   // saut.json next to the first target or in an ancestor
   let dir = path.resolve(targets[0] ?? '.');
   for (let i = 0; i < 6; i++) {
     const p = path.join(dir, 'saut.json');
-    if (await exists(p)) return (JSON.parse(await fs.readFile(p, 'utf8')) as { budgets?: Budgets }).budgets ?? {};
+    if (await exists(p)) return (JSON.parse(await readText(p)) as { budgets?: Budgets }).budgets ?? {};
     const up = path.dirname(dir); if (up === dir) break; dir = up;
   }
   return {};
