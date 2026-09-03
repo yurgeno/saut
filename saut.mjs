@@ -13,7 +13,8 @@
 //   tools.mts        tool registry: builtin per harness + MCP catalog + live tools/list
 //   lint.mts         the rules (privilege semantics, correctness, hygiene) + SARIF
 //   cost.mts         always-on / on-invoke token passport (estimate | --exact)
-//   commands.mts     lint / cost / passport / harnesses / tools
+//   adapters/taut.mts TAUT packs: engine-parsed frontmatter, wiring vs catalog, compile preview
+//   commands.mts     lint / cost / passport / preview / harnesses / tools
 import process from 'node:process';
 
 const nodeMajor = Number(process.versions.node.split('.')[0]);
@@ -23,7 +24,7 @@ if (nodeMajor < 24) {
 }
 
 const { SautError } = await import('./lib/util.mts');
-const { VERSION, cmdCost, cmdHarnesses, cmdLint, cmdPassport, cmdTools } = await import('./lib/commands.mts');
+const { VERSION, cmdCost, cmdHarnesses, cmdLint, cmdPassport, cmdPreview, cmdTools } = await import('./lib/commands.mts');
 
 function parseArgs(argv) {
   const opts = { _: [], harness: [] };
@@ -37,6 +38,9 @@ function parseArgs(argv) {
     else if (a === '--exact') opts.exact = true;
     else if (a === '--budget') opts.budget = argv[++i];
     else if (a === '--strict') opts.strict = true;
+    else if (a === '--taut') opts.taut = argv[++i];
+    else if (a === '--deployment') opts.deployment = argv[++i];
+    else if (a === '--no-taut') opts.noTaut = true;
     else if (a === '--help' || a === '-h') opts.help = true;
     else if (a.startsWith('--')) { process.stderr.write(`saut: unknown option ${a}\n`); process.exit(2); }
     else opts._.push(a);
@@ -56,6 +60,7 @@ Commands
   passport [paths…]    lint + cost + harness matrix as one JSON document
   harnesses            the capability registry (what each harness enforces / degrades)
   tools [dir]          the tool registry: builtin per harness + MCP catalog (+ --live)
+  preview <name> [dir] TAUT packs: the compiled bytes of one skill/agent per harness (engine render)
 
 Options
   --harness <ids>      comma-separated subset (default: every registered harness)
@@ -66,12 +71,19 @@ Options
   --json | --sarif     machine output (sarif: lint only)
   --strict             lint exits 1 on medium findings too (default: high only)
 
+TAUT packs (auto-detected: pack.json + skills/ or <project>/deployment.json)
+  --taut <dir>         the TAUT engine to import (default: $SAUT_TAUT_ENGINE, ~/taut, ~/federation)
+  --deployment <name>  which project of the pack (required when it has several)
+  --no-taut            lint a TAUT pack as plain skills
+  With an engine: frontmatter is parsed by the engine, metadata.taut is checked against the
+  pack catalog, passport/preview carry the compiled bytes + recorded degradations per harness.
+
 Exit codes: 0 clean/within budget · 1 findings/over budget · 2 usage error
 `;
 
 const opts = parseArgs(process.argv.slice(2));
 const cmd = opts._.shift();
-const table = { lint: cmdLint, cost: cmdCost, passport: cmdPassport, harnesses: cmdHarnesses, tools: cmdTools };
+const table = { lint: cmdLint, cost: cmdCost, passport: cmdPassport, preview: cmdPreview, harnesses: cmdHarnesses, tools: cmdTools };
 if (!cmd || opts.help || cmd === 'help') { process.stdout.write(HELP); process.exit(0); }
 if (cmd === 'version' || cmd === '--version') { process.stdout.write(`${VERSION}\n`); process.exit(0); }
 if (!table[cmd]) { process.stderr.write(`saut: unknown command "${cmd}"\n\n${HELP}`); process.exit(2); }

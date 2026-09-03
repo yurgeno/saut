@@ -4,10 +4,11 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadHarnesses } from './caps.mts';
-import { costOf, overBudget } from './cost.mts';
+import { costOf, estimateTokens, overBudget } from './cost.mts';
 import { lintArtifact, matrix, sortDiags, toSarif } from './lint.mts';
-import { discover } from './skill.mts';
+import { discover, loadAgent } from './skill.mts';
 import { buildRegistry } from './tools.mts';
+import { catalogServers, detectTaut, lintWiring, previews, refine, type TautContext, type TautPreview } from './adapters/taut.mts';
 import type { AgentArtifact, Artifact, Budgets, CostLine, Diagnostic, HarnessCaps, ToolRegistry } from './types.mts';
 import { c, count, exists, rel } from './util.mts';
 
@@ -24,6 +25,9 @@ export interface Opts {
   exact?: boolean;
   budget?: string;
   strict?: boolean;        // exit 1 on medium too
+  taut?: string;           // TAUT engine dir (adapter); auto: SAUT_TAUT_ENGINE, ~/taut, ~/federation
+  deployment?: string;     // TAUT deployment (project) when the pack has several
+  noTaut?: boolean;        // force plain mode on a TAUT pack
   help?: boolean;
 }
 
@@ -45,30 +49,62 @@ async function budgetsFor(targets: string[], opts: Opts): Promise<Budgets> {
   return {};
 }
 
-export async function load(targets: string[], opts: Opts): Promise<{ artifacts: Artifact[]; harnesses: HarnessCaps[]; registry: ToolRegistry; agentsByName: Map<string, AgentArtifact> }> {
+export interface Loaded { artifacts: Artifact[]; harnesses: HarnessCaps[]; registry: ToolRegistry; agentsByName: Map<string, AgentArtifact>; taut: TautContext | null; tautFindings: Diagnostic[]; note: string | null }
+
+export async function load(targets: string[], opts: Opts): Promise<Loaded> {
   if (!targets.length) targets = ['.'];
-  const artifacts = await discover(targets);
+  let artifacts = await discover(targets);
   const harnesses = await selectHarnesses(opts);
-  const registry = await buildRegistry({ catalog: opts.catalog, live: opts.live, start: path.resolve(targets[0]) });
+  let taut: TautContext | null = null;
+  let note: string | null = null;
+  const tautFindings: Diagnostic[] = [];
+  if (!opts.noTaut) {
+    const det = await detectTaut(targets, { taut: opts.taut ?? null, deployment: opts.deployment ?? null });
+    taut = det.ctx; note = det.note;
+  }
+  const registry = await buildRegistry({ catalog: taut ? null : opts.catalog, live: opts.live, start: path.resolve(targets[0]) });
+  if (taut) {
+    registry.servers = catalogServers(taut);
+    const refined: Artifact[] = [];
+    for (const a of artifacts) { const r = await refine(a, taut); refined.push(r.artifact); tautFindings.push(...r.findings); }
+    artifacts = refined;
+    // the engine's adapter records override the registry rows for the harnesses it ships
+    for (const h of harnesses) {
+      const c = taut.caps[h.id];
+      if (c) { h.degradations = c.degradations; h.toolAllowlist = c.skillAllowlist as HarnessCaps['toolAllowlist']; h.agentAllowlist = c.agentAllowlist as HarnessCaps['agentAllowlist']; }
+    }
+  }
   const agentsByName = new Map<string, AgentArtifact>();
   for (const a of artifacts) if (a.kind === 'agent') agentsByName.set(a.name, a);
-  return { artifacts, harnesses, registry, agentsByName };
+  // a TAUT pack's agents live in the catalog even when the target was one skill dir
+  if (taut) for (const [name, entry] of taut.catalog.agents) if (!agentsByName.has(name)) agentsByName.set(name, (await refine(await loadAgent(entry.path), taut)).artifact as AgentArtifact);
+  return { artifacts, harnesses, registry, agentsByName, taut, tautFindings, note };
 }
 
 // ---- lint ---------------------------------------------------------------------------
-export async function runLint(targets: string[], opts: Opts): Promise<{ diagnostics: Diagnostic[]; artifacts: Artifact[]; harnesses: HarnessCaps[] }> {
-  const { artifacts, harnesses, registry, agentsByName } = await load(targets, opts);
-  const diagnostics: Diagnostic[] = [];
-  for (const a of artifacts) diagnostics.push(...lintArtifact(a, { harnesses, registry, agentsByName }));
-  return { diagnostics: sortDiags(diagnostics), artifacts, harnesses };
+export async function runLint(targets: string[], opts: Opts): Promise<{ diagnostics: Diagnostic[]; artifacts: Artifact[]; harnesses: HarnessCaps[]; taut: TautContext | null; note: string | null }> {
+  const { artifacts, harnesses, registry, agentsByName, taut, tautFindings, note } = await load(targets, opts);
+  const diagnostics: Diagnostic[] = [...tautFindings];
+  for (const a of artifacts) {
+    let ds = lintArtifact(a, { harnesses, registry, agentsByName });
+    if (taut) {
+      // the adapter judges the wiring against the real catalog — drop the generic shape checks
+      ds = ds.filter((x) => !x.code.startsWith('taut-'));
+      ds.push(...lintWiring(a, taut));
+    }
+    diagnostics.push(...ds);
+  }
+  return { diagnostics: sortDiags(diagnostics), artifacts, harnesses, taut, note };
 }
 
 export async function cmdLint(opts: Opts): Promise<number> {
-  const { diagnostics, artifacts, harnesses } = await runLint(opts._, opts);
+  const { diagnostics, artifacts, harnesses, taut, note } = await runLint(opts._, opts);
   if (opts.sarif) { process.stdout.write(JSON.stringify(toSarif(diagnostics, VERSION), null, 2) + '\n'); }
   else if (opts.json) { process.stdout.write(JSON.stringify({ version: VERSION, artifacts: artifacts.map((a) => ({ kind: a.kind, name: a.name, path: a.path })), diagnostics }, null, 2) + '\n'); }
   else {
     if (!artifacts.length) { process.stdout.write('no skills or agents found\n'); return 1; }
+    if (taut) process.stdout.write(c.dim(`TAUT pack ${rel(taut.packRoot)} · engine ${rel(taut.engine)}${taut.engineCommit ? ` @${taut.engineCommit}` : ''}${taut.project ? ` · deployment ${taut.project.name}` : ''} — engine-parsed frontmatter, wiring checked against the catalog\n`));
+    else if (note) process.stdout.write(c.dim(note + '\n'));
     const byPath = new Map<string, Diagnostic[]>();
     for (const x of diagnostics) byPath.set(x.path, [...(byPath.get(x.path) ?? []), x]);
     for (const a of artifacts) {
@@ -127,15 +163,42 @@ export async function cmdCost(opts: Opts): Promise<number> {
 
 // ---- passport (lint + cost + matrix in one JSON) ---------------------------------------
 export async function cmdPassport(opts: Opts): Promise<number> {
-  const { diagnostics, artifacts, harnesses } = await runLint(opts._, opts);
+  const { diagnostics, artifacts, harnesses, taut } = await runLint(opts._, opts);
   const { lines } = await runCost(opts._, opts);
-  const out = artifacts.map((a) => ({
-    kind: a.kind, name: a.name, path: a.path,
-    findings: diagnostics.filter((x) => x.path === a.path),
-    cost: lines.find((l) => l.artifact.path === a.path)?.line ?? null,
-    matrix: matrix(a, harnesses),
-  }));
-  process.stdout.write(JSON.stringify({ version: VERSION, passports: out }, null, 2) + '\n');
+  const out = [];
+  for (const a of artifacts) {
+    const compiled: (Omit<TautPreview, 'content'> & { tokens: number })[] = taut
+      ? (await previews(a, taut)).map((p) => ({ harness: p.harness, id: p.id, bytes: p.bytes, transform: p.transform, degradations: p.degradations, tokens: estimateTokens(p.content) }))
+      : [];
+    out.push({
+      kind: a.kind, name: a.name, path: a.path,
+      findings: diagnostics.filter((x) => x.path === a.path),
+      cost: lines.find((l) => l.artifact.path === a.path)?.line ?? null,
+      matrix: matrix(a, harnesses),
+      ...(taut ? { compiled } : {}),
+    });
+  }
+  process.stdout.write(JSON.stringify({ version: VERSION, taut: taut ? { packRoot: taut.packRoot, engine: taut.engine, engineCommit: taut.engineCommit, deployment: taut.project?.name ?? null } : null, passports: out }, null, 2) + '\n');
+  return 0;
+}
+
+// ---- preview (TAUT compile preview of one artifact on one harness) --------------------
+export async function cmdPreview(opts: Opts): Promise<number> {
+  const name = opts._[0];
+  if (!name) { process.stderr.write('saut preview <skill-or-agent name> --harness <id> [--taut <engine>] [--deployment <n>]\n'); return 2; }
+  const { artifacts, taut } = await load([opts._[1] ?? '.'], opts);
+  if (!taut) { process.stderr.write('preview needs a TAUT pack and engine (not a TAUT pack here, or no engine: --taut <dir> / SAUT_TAUT_ENGINE)\n'); return 2; }
+  const a = artifacts.find((x) => x.name === name);
+  if (!a) { process.stderr.write(`"${name}" not found under ${opts._[1] ?? '.'}\n`); return 2; }
+  const hs = opts.harness?.length ? opts.harness : taut.harnessIds;
+  const all = (await previews(a, taut)).filter((p) => hs.includes(p.harness));
+  if (opts.json) { process.stdout.write(JSON.stringify(all, null, 2) + '\n'); return 0; }
+  for (const p of all) {
+    process.stdout.write(`${c.bold(`── ${p.harness} → ${p.id || '(render error)'}`)} ${c.dim(`${p.bytes} bytes · ~${estimateTokens(p.content)} tok · ${p.transform}`)}\n`);
+    for (const d of p.degradations) process.stdout.write(`${c.yellow('   degradation')} ${d.id}: ${d.text}\n`);
+    if (all.length === 1 || opts.harness?.length === 1) process.stdout.write(p.content + (p.content.endsWith('\n') ? '' : '\n'));
+  }
+  if (all.length > 1 && !(opts.harness?.length === 1)) process.stdout.write(c.dim('(pass --harness <id> to print the compiled bytes)\n'));
   return 0;
 }
 

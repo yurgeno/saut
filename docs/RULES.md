@@ -44,13 +44,22 @@ harness, what the declared allowlist actually is there — `restrict`, `grant`, 
 | `frontmatter-syntax` / `no-frontmatter` | high | the frontmatter cannot be parsed (unterminated list, anchors, continuation lines…) | — |
 | `duplicate-key` | info | a top-level key appears more than once — capability-marker branches; allowlists are read as the union, the first description wins | TAUT markers |
 
-## TAUT wiring (shape checks; the adapter validates against the engine)
+## TAUT wiring
+
+Plain mode (no engine) checks the shape against whatever catalog and agents were discovered;
+with an engine the adapter judges against the pack's real catalog and the shape rules are replaced.
 
 | rule | severity | fires when | precedent |
 |---|---|---|---|
 | `taut-mcp-role-unknown` | medium | `metadata.taut.mcp` names a role no catalog server carries | C2 |
-| `taut-mcp-role-unused` | low | the role's tools are never called in the body (delegated to agents?) — the key is documentary in the engine | C2 |
-| `taut-agent-missing` | high | `metadata.taut.agents` names an agent not found among the discovered agents (only when agents were in scope) | — |
+| `taut-mcp-role-unused` | low | (plain mode) the role's tools are never called in the body (delegated to agents?) — the key is documentary in the engine | C2 |
+| `taut-agent-missing` | high | `metadata.taut.agents` names an agent not in the catalog (plain mode: not among discovered agents, only when agents were in scope) — the engine fails setup | — |
+| `taut-requires-unknown` | high | (engine) `metadata.taut.requires` names a gate the engine does not know (`kaut`) | — |
+| `taut-repo-unknown` | high | (engine) `metadata.taut.repos` names a repo outside the deployment's repo map — the compile fails | — |
+| `taut-role-unknown` | info | (engine) `metadata.taut.role` is not a role the engine consumes (`stack-engine`, `spa-mock`, `init`, `knowledge`) | — |
+| `taut-wiring-unknown-key` | medium | (engine) a `metadata.taut` key the engine never reads | C2 |
+| `taut-compile` | high | (engine) the marker pass or the engine's frontmatter parser refuses the source, `metadata.taut` varies by branch, legacy `metadata.federation`, name ≠ directory — the pack will not compile | PACK.md §10 |
+| `taut-empty-wiring` | info | (engine) `metadata.taut: {}` — the engine reads `{}` as a string; omit the key | — |
 
 ## Output
 

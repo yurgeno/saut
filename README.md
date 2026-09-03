@@ -17,7 +17,8 @@ case, not a requirement.
 ```
 saut lint  <skills or agents…>   privilege / correctness findings + per-harness enforcement
 saut cost  <skills or agents…>   always-on vs on-invoke token passport, budgets
-saut passport <…>                lint + cost + harness matrix as one JSON
+saut passport <…>                lint + cost + harness matrix (+ compiled previews) as one JSON
+saut preview <name> [dir]        TAUT packs: the compiled bytes of one artifact per harness
 saut harnesses                   what each harness enforces, degrades, and lists
 saut tools [dir] [--live]        the tool names an allowlist may cite (builtin + MCP catalog)
 ```
@@ -103,22 +104,46 @@ the documentation URLs the entry was derived from. `saut harnesses` prints it. A
 harness is adding a file; no rule changes.
 
 Registered today: `claude-code`, `codex`, `opencode` (with headless runners — the test
-bench lands next), `cursor`, `copilot` (registry-only).
+bench lands next), `cursor`, `copilot` (registry-only). In a TAUT pack the engine's own
+adapter records take precedence for the harnesses it ships.
 
 ## TAUT packs
 
-A TAUT data pack lints without any adapter: capability-marker branches
-(`# kaut:on` … `# kaut:off`) are read as the *union* of allowlists and the first description;
-`metadata.taut.{agents,mcp}` is checked against the pack's agents and catalog roles. The TAUT
-adapter (exact per-branch compile preview, engine-parsed frontmatter, lock-aware publish) is
-the next milestone — see the roadmap below.
+A [TAUT](https://github.com/yurgeno/taut) data pack is detected by shape (`pack.json` +
+`skills/` or `<project>/deployment.json`). Without an engine it lints as plain skills —
+capability-marker branches (`# kaut:on` … `# kaut:off`) are read as the *union* of
+allowlists and the first description. With an engine reachable (`--taut <dir>`,
+`$SAUT_TAUT_ENGINE`, `~/taut`, `~/federation`; engine commit `3e00050` or later, which
+ships the `render` verb and the harness capability registry), the adapter switches on:
+
+- skill frontmatter is parsed by the **engine's** parser — the strict subset that decides
+  a compile — under the all-gates-ON view; what the engine refuses is a `taut-compile`
+  finding, not a crash;
+- `metadata.taut` is checked against the pack's real catalog: `agents` must exist,
+  `mcp` roles must be carried by a catalog server, `repos` must be in the deployment's
+  repo map, `requires` must be a gate the engine knows, `role` one it consumes;
+- the matrix uses the engine's own adapter records (allowlist semantics, degradations);
+- `saut passport` adds `compiled`: for every harness the target path, byte size, token
+  estimate and recorded degradations of the exact artifact the installer writes;
+  `saut preview <name> [dir] --harness <id>` prints those bytes.
+
+```bash
+saut lint ~/taut-data-community                      # engine auto-detected
+saut preview dev-reviewer ~/taut-data-community --harness codex
+saut passport ~/taut-data/upe/skills/upe-verify --deployment upe
+saut lint ~/taut-data --no-taut                      # plain mode on purpose
+```
+
+Pack CI: `tools/validate-pack.sh` in the TAUT packs runs `saut lint` after the compile when
+`SAUT` points at a checkout (`SAUT=~/saut tools/validate-pack.sh`); `SAUT_STRICT=1` turns
+its findings into a failing step.
 
 ## Roadmap
 
-- **P0 (this release)** — core: parser + emitter, harness registry, tool registry (+ live),
-  `lint`, `cost`, `passport`.
-- **P1** — TAUT adapter: engine-parsed frontmatter, per-branch compile preview, degradations
-  from the engine, publish into a pack under `validate-pack.sh`.
+- **P0** ✓ — core: parser + emitter, harness registry, tool registry (+ live), `lint`, `cost`,
+  `passport`.
+- **P1** ✓ — TAUT adapter: engine-parsed frontmatter, wiring checked against the catalog,
+  compile preview + degradations from the engine (`taut render`), `saut lint` in pack CI.
 - **P2** — test bench: compile into a scratch workspace and run each harness headlessly —
   *does the skill trigger* (with/without ablation), *does the run stay inside the allowlist*
   (the obedience matrix — on Codex/OpenCode this measures the degradation), neutral trace.
