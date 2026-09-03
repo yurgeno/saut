@@ -14,7 +14,7 @@ saut test skills/dev-review                        # L3, 1 run per case, every r
 saut test skills/dev-review --level 1              # free: compile only
 saut test skills/dev-review --harness codex --runs 3 --max-cost 1.00
 saut test agents/dev-reviewer.md --case implicit   # one case
-saut test skills/upe-verify --landscape ~/IdeaProjects --keep
+saut test skills/verify --landscape ~/projects --keep
 ```
 
 ## L1 — the scratch workspace

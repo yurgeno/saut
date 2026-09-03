@@ -2,7 +2,7 @@
 
 ```bash
 saut studio .                    # a skill folder, a repo, or a TAUT pack
-saut studio ~/taut-data --port 7391 --deployment upe
+saut studio ~/my-pack --port 7391 --deployment myproject
 ```
 
 A local page over the same library functions the CLI verbs call: nothing here re-implements a

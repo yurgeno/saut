@@ -137,10 +137,10 @@ ships the `render` verb and the harness capability registry), the adapter switch
   `saut preview <name> [dir] --harness <id>` prints those bytes.
 
 ```bash
-saut lint ~/taut-data-community                      # engine auto-detected
+saut lint ~/taut-data-community                      # engine auto-detected (the public starter pack)
 saut preview dev-reviewer ~/taut-data-community --harness codex
-saut passport ~/taut-data/upe/skills/upe-verify --deployment upe
-saut lint ~/taut-data --no-taut                      # plain mode on purpose
+saut passport ~/my-pack/myproject/skills/verify --deployment myproject
+saut lint ~/my-pack --no-taut                        # plain mode on purpose
 ```
 
 Pack CI: `tools/validate-pack.sh` in the TAUT packs runs `saut lint` after the compile when
