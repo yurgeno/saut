@@ -98,6 +98,9 @@ tool calls, usage, cost and the path to the raw event stream under `traces/`. `-
 it, `--json` prints it. Exit code 1 when the compile failed, a fire rate is 0, a control
 fired, or a call landed outside the allowlist.
 
+Results land next to the artifact by convention (the `plugin eval` layout). In a pack under
+version control, add `evals/results/` to `.gitignore` — the cases are source, the runs are not.
+
 ## Adding a harness
 
 A harness with a `runner` entry in `lib/harnesses/<id>.json` and a parser in

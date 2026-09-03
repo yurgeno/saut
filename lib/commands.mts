@@ -10,6 +10,7 @@ import { discover, loadAgent } from './skill.mts';
 import { buildRegistry } from './tools.mts';
 import { catalogServers, detectTaut, lintWiring, previews, refine, type TautContext, type TautPreview } from './adapters/taut.mts';
 import { runBench } from './bench/bench.mts';
+import { startStudio } from './studio/server.mts';
 import type { BenchResult } from './bench/types.mts';
 import type { AgentArtifact, Artifact, Budgets, CostLine, Diagnostic, HarnessCaps, ToolRegistry } from './types.mts';
 import { c, count, exists, isDir, rel } from './util.mts';
@@ -40,6 +41,7 @@ export interface Opts {
   out?: string;            // results dir (default <artifact>/evals/results/<timestamp>)
   keep?: boolean;          // keep the scratch workspace
   timeout?: number;        // seconds per run (default 300)
+  port?: number;           // studio
   help?: boolean;
 }
 
@@ -291,4 +293,16 @@ function printBench(r: BenchResult): void {
     if (comp) process.stdout.write(c.dim(`    caveat: ${comp} other skills were installed for this session — implicit triggering competes with them\n`));
   }
   if (r.budget.exhausted) process.stdout.write(c.yellow(`  budget ${r.budget.maxCostUsd} USD exhausted after $${r.budget.spentUsd.toFixed(3)}\n`));
+}
+
+// ---- studio (the loopback UI over the same verbs) ----------------------------------------
+export async function cmdStudio(opts: Opts): Promise<number> {
+  const root = path.resolve(opts._[0] ?? '.');
+  if (!(await isDir(root))) { process.stderr.write(`saut studio <dir>: ${root} is not a directory\n`); return 2; }
+  const h = await startStudio(root, opts);
+  const url = `http://127.0.0.1:${h.port}/`;
+  process.stdout.write(`${c.bold('SAUT Studio')} ${url}\n`);
+  process.stdout.write(c.dim(`  root ${rel(root)} · loopback only · per-session token · Ctrl-C to stop\n`));
+  await new Promise(() => undefined);          // serve until interrupted
+  return 0;
 }

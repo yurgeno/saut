@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SAUT Studio</title>
+<style>
+  :root { color-scheme: dark;
+    --bg: #0f1115; --panel: #151920; --panel2: #10141a; --border: #242b36;
+    --text: #dde2ea; --muted: #8a93a3; --accent: #5c8ef2;
+    --ok: #3fb076; --warn: #d9a13b; --bad: #e06060; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .mono, textarea, input, select { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .wrap { max-width: 1600px; margin: 0 auto; padding: 18px 22px 40px; }
+  h1 { font-size: 15px; font-weight: 650; letter-spacing: .02em; margin: 0; display: inline-block; }
+  #sub { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px;
+         color: var(--muted); margin: 5px 0 14px; word-break: break-all; }
+  .cols { display: grid; grid-template-columns: 260px minmax(420px, 1fr) minmax(360px, 460px); gap: 16px; align-items: start; }
+  @media (max-width: 1180px) { .cols { grid-template-columns: 1fr; } }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; }
+  .card h2 { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em;
+             color: var(--muted); margin: 0 0 10px; }
+  label { display: block; font-size: 11.5px; color: var(--muted); margin: 9px 0 3px; }
+  input[type=text], select, textarea { width: 100%; background: var(--panel2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 7px; padding: 6px 8px; font-size: 12px; }
+  textarea { resize: vertical; line-height: 1.55; }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .btn { height: 30px; padding: 0 14px; border-radius: 8px; border: 1px solid #2e3644;
+         background: #1b212b; color: var(--text); font: 500 12.5px/1 inherit; cursor: pointer; }
+  .btn:hover:not(:disabled) { background: #232b38; border-color: #3b465a; }
+  .btn:disabled { opacity: .38; cursor: default; }
+  .btn.primary { border-color: #34507f; background: #1c2a44; }
+  .list { max-height: 320px; overflow: auto; margin: 0 -4px; }
+  .item { display: block; width: 100%; text-align: left; background: transparent; border: none;
+          color: var(--text); padding: 5px 8px; border-radius: 6px; cursor: pointer; font: inherit; }
+  .item:hover { background: #1b212b; }
+  .item.active { background: #1c2a44; }
+  .item .k { color: var(--muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; }
+  .pill { display: inline-block; font-size: 10.5px; padding: 2px 7px; border-radius: 999px;
+          border: 1px solid var(--border); color: var(--muted); margin: 0 4px 4px 0; white-space: nowrap; }
+  .pill.on { color: #9fc4ff; border-color: #34507f; background: rgba(92,142,242,.1); }
+  .pill.ok { color: #6fd49a; border-color: #2b5c42; } .pill.warn { color: #e4b45e; border-color: #6b5620; }
+  .pill.bad { color: #ef8b8b; border-color: #6d2f2f; }
+  .pill button { background: none; border: none; color: inherit; cursor: pointer; padding: 0 0 0 5px; font: inherit; }
+  .find { border-left: 2px solid var(--border); padding: 4px 0 4px 9px; margin: 6px 0; font-size: 12px; }
+  .find.high { border-color: var(--bad); } .find.medium { border-color: var(--warn); }
+  .find .code { color: var(--muted); font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
+  table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+  th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; }
+  pre { background: var(--panel2); border: 1px solid var(--border); border-radius: 7px;
+        padding: 9px 11px; overflow: auto; max-height: 340px; font-size: 11.5px; margin: 8px 0 0; }
+  .muted { color: var(--muted); } .ok { color: var(--ok); } .bad { color: var(--bad); } .warn { color: var(--warn); }
+  .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin: 0 0 12px; }
+  .tab { padding: 7px 12px 8px; background: transparent; border: none; color: var(--muted);
+         font: 500 12.5px/1 inherit; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .tab.active { color: var(--text); border-bottom-color: var(--accent); }
+  #toast { position: fixed; right: 18px; bottom: 18px; background: var(--panel); border: 1px solid var(--border);
+           border-radius: 8px; padding: 9px 13px; font-size: 12px; display: none; max-width: 460px; }
+  .split { display: grid; grid-template-columns: 1fr; gap: 10px; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 11.5px; }
+</style>
+</head><body>
+<div class="wrap">
+  <h1>SAUT Studio</h1> <span id="mode" class="pill"></span>
+  <div id="sub" class="mono"></div>
+
+  <div class="cols">
+    <!-- ── left: artifacts ─────────────────────────────────────── -->
+    <div>
+      <div class="card">
+        <h2>Artifacts</h2>
+        <div class="row" style="margin-bottom:8px">
+          <button class="btn" id="newSkill">New skill</button>
+          <button class="btn" id="newAgent">New agent</button>
+        </div>
+        <div class="list" id="artifacts"></div>
+      </div>
+      <div class="card">
+        <h2>Harnesses</h2>
+        <div id="harnesses"></div>
+      </div>
+    </div>
+
+    <!-- ── middle: form + body ─────────────────────────────────── -->
+    <div>
+      <div class="card">
+        <h2>Frontmatter</h2>
+        <div class="split">
+          <div class="row">
+            <div style="flex:1"><label>name</label><input type="text" id="f_name" placeholder="my-skill"></div>
+            <div style="flex:1"><label>argument-hint</label><input type="text" id="f_hint" placeholder="&lt;TASK&gt;"></div>
+          </div>
+          <div><label>description <span class="muted" id="descCount"></span></label>
+               <textarea id="f_desc" rows="3" placeholder="When to use this — the routing sentence. Paid in every session."></textarea></div>
+          <div class="row">
+            <label style="margin:0"><input type="checkbox" id="f_userInv" checked> user-invocable</label>
+            <label style="margin:0"><input type="checkbox" id="f_noModel"> disable-model-invocation</label>
+            <div style="flex:1"><input type="text" id="f_model" placeholder="model (optional)"></div>
+            <div style="flex:1"><input type="text" id="f_effort" placeholder="effort (optional)"></div>
+          </div>
+          <div>
+            <label>allowed-tools <span class="muted">— what the harness pre-approves; a restriction only where the registry says <code>restrict</code></span></label>
+            <div id="toolPills"></div>
+            <div class="row">
+              <select id="toolPick" style="flex:1"></select>
+              <button class="btn" id="addTool">add</button>
+              <input type="text" id="toolScope" placeholder="scope, e.g. git status *" style="flex:1">
+            </div>
+          </div>
+          <div id="tautBlock" style="display:none">
+            <label>metadata.taut <span class="muted">— wiring, checked against the pack catalog</span></label>
+            <div class="row">
+              <input type="text" id="f_agents" placeholder="agents: a, b" style="flex:1">
+              <input type="text" id="f_mcp" placeholder="mcp roles: docs" style="flex:1">
+            </div>
+            <div class="row" style="margin-top:6px">
+              <input type="text" id="f_requires" placeholder="requires: kaut" style="flex:1">
+              <input type="text" id="f_repos" placeholder="repos: a, b" style="flex:1">
+              <input type="text" id="f_role" placeholder="role" style="flex:1">
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Body <span class="muted" id="bodyCount"></span></h2>
+        <textarea id="body" rows="20" spellcheck="false" placeholder="# my-skill&#10;&#10;The method. Loaded only when the skill fires."></textarea>
+        <div class="row" style="margin-top:9px">
+          <button class="btn primary" id="save">Save</button>
+          <button class="btn" id="revert">Revert</button>
+          <span class="muted" id="savePath"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── right: passport / bench ─────────────────────────────── -->
+    <div>
+      <div class="card">
+        <div class="tabs">
+          <button class="tab active" data-tab="passport">Passport</button>
+          <button class="tab" data-tab="compiled">Compiled</button>
+          <button class="tab" data-tab="bench">Bench</button>
+        </div>
+
+        <div id="tab-passport">
+          <div id="cost"></div>
+          <div id="matrix"></div>
+          <div id="findings"></div>
+        </div>
+
+        <div id="tab-compiled" style="display:none">
+          <div id="compiledList"></div>
+        </div>
+
+        <div id="tab-bench" style="display:none">
+          <div class="row">
+            <select id="benchLevel">
+              <option value="1">L1 compile (free)</option>
+              <option value="2">L2 + trigger</option>
+              <option value="3" selected>L3 + obedience</option>
+            </select>
+            <input type="text" id="benchRuns" value="1" style="width:64px" title="runs per case">
+            <input type="text" id="benchCost" value="0.50" style="width:80px" title="max cost, USD">
+          </div>
+          <div class="row" style="margin-top:7px" id="benchHarnesses"></div>
+          <div class="row" style="margin-top:8px">
+            <button class="btn primary" id="runBench">Run</button>
+            <button class="btn" id="validate">Validate pack</button>
+          </div>
+          <pre id="benchLog" style="display:none"></pre>
+          <div id="benchMatrix"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+const TOKEN = '%%TOKEN%%';
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+let ctx = null, current = null, dirty = false, selectedTools = [], benchSel = [];
+
+function toast(msg, bad) {
+  const t = $('toast'); t.textContent = msg; t.style.display = 'block';
+  t.style.borderColor = bad ? '#6d2f2f' : '#242b36';
+  clearTimeout(t._h); t._h = setTimeout(() => { t.style.display = 'none'; }, 5200);
+}
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : {
+    method: 'POST', headers: { 'content-type': 'application/json', 'x-saut-token': TOKEN }, body: JSON.stringify(body),
+  });
+  const j = await r.json().catch(() => ({ error: 'bad response' }));
+  if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+  return j;
+}
+
+// ── context ───────────────────────────────────────────────────────
+async function loadContext() {
+  ctx = await api('/api/context');
+  $('mode').textContent = ctx.taut ? 'TAUT pack' : 'generic';
+  $('mode').className = 'pill ' + (ctx.taut ? 'on' : '');
+  $('sub').textContent = ctx.root + (ctx.taut ? '  ·  engine ' + ctx.taut.engine + (ctx.taut.engineCommit ? ' @' + ctx.taut.engineCommit : '') + (ctx.taut.deployment ? '  ·  deployment ' + ctx.taut.deployment : '') : '') + (ctx.note ? '  ·  ' + ctx.note : '');
+  $('tautBlock').style.display = ctx.taut ? 'block' : 'none';
+  drawArtifacts(); drawHarnesses(); drawToolPicker(); drawBenchHarnesses();
+}
+
+function drawArtifacts() {
+  const el = $('artifacts'); el.innerHTML = '';
+  for (const a of ctx.artifacts) {
+    const b = document.createElement('button');
+    b.className = 'item' + (current && current.path === a.path ? ' active' : '');
+    b.innerHTML = '<span class="k">' + a.kind + '</span> ' + esc(a.name);
+    b.onclick = () => openArtifact(a.path);
+    el.appendChild(b);
+  }
+  if (!ctx.artifacts.length) el.innerHTML = '<div class="muted">nothing found under this root</div>';
+}
+
+function drawHarnesses() {
+  $('harnesses').innerHTML = ctx.harnesses.map((h) => {
+    const sem = h.toolAllowlist;
+    const cls = sem === 'restrict' ? 'ok' : sem === 'grant' ? 'warn' : 'bad';
+    return '<div style="margin-bottom:7px"><b>' + esc(h.id) + '</b> ' + (h.runner ? '' : '<span class="pill">no runner</span>') +
+      '<br><span class="pill ' + cls + '">skills: ' + esc(sem) + '</span><span class="pill">agents: ' + esc(h.agentAllowlist) + '</span>' +
+      (h.degradations.length ? '<details><summary>' + h.degradations.length + ' recorded degradation(s)</summary>' +
+        h.degradations.map((d) => '<div class="muted" style="margin:4px 0">' + esc(d.id) + ': ' + esc(d.text) + '</div>').join('') + '</details>' : '') + '</div>';
+  }).join('');
+}
+
+function allToolNames() {
+  const set = new Set();
+  for (const list of Object.values(ctx.tools.builtin)) for (const t of list) if (/^[A-Z]/.test(t)) set.add(t);
+  for (const s of ctx.tools.servers) for (const t of s.tools) set.add(t);
+  return [...set].sort();
+}
+function drawToolPicker() {
+  $('toolPick').innerHTML = allToolNames().map((t) => '<option>' + esc(t) + '</option>').join('');
+}
+function drawTools() {
+  $('toolPills').innerHTML = selectedTools.map((t, i) =>
+    '<span class="pill on">' + esc(t) + '<button data-i="' + i + '">×</button></span>').join('') || '<span class="muted">none — the skill gets the full toolset</span>';
+  for (const b of $('toolPills').querySelectorAll('button')) b.onclick = () => { selectedTools.splice(+b.dataset.i, 1); drawTools(); dirty = true; };
+}
+function drawBenchHarnesses() {
+  const runnable = ctx.harnesses.filter((h) => h.runner);
+  if (!benchSel.length) benchSel = runnable.map((h) => h.id);
+  $('benchHarnesses').innerHTML = runnable.map((h) =>
+    '<label style="margin:0"><input type="checkbox" data-h="' + esc(h.id) + '"' + (benchSel.includes(h.id) ? ' checked' : '') + '> ' + esc(h.id) + '</label>').join(' ');
+  for (const c of $('benchHarnesses').querySelectorAll('input')) c.onchange = () => {
+    benchSel = [...$('benchHarnesses').querySelectorAll('input')].filter((x) => x.checked).map((x) => x.dataset.h);
+  };
+}
+
+// ── artifact ──────────────────────────────────────────────────────
+async function openArtifact(p) {
+  const pass = await api('/api/artifact?path=' + encodeURIComponent(p));
+  current = pass;
+  const fm = pass.frontmatter || {};
+  $('f_name').value = fm.name || pass.name || '';
+  $('f_desc').value = fm.description || '';
+  $('f_hint').value = fm['argument-hint'] || '';
+  $('f_userInv').checked = fm['user-invocable'] !== false;
+  $('f_noModel').checked = fm['disable-model-invocation'] === true;
+  $('f_model').value = fm.model || '';
+  $('f_effort').value = fm.effort || '';
+  const key = pass.kind === 'agent' ? 'tools' : 'allowed-tools';
+  const raw = fm[key];
+  selectedTools = Array.isArray(raw) ? raw.slice() : (typeof raw === 'string' && raw.trim() ? raw.split(',').map((x) => x.trim()) : []);
+  const w = (fm.metadata && typeof fm.metadata === 'object' && fm.metadata.taut) || {};
+  $('f_agents').value = (w.agents || []).join(', ');
+  $('f_mcp').value = (w.mcp || []).join(', ');
+  $('f_requires').value = (w.requires || []).join(', ');
+  $('f_repos').value = (w.repos || []).join(', ');
+  $('f_role').value = w.role || '';
+  const body = pass.text.replace(/^---\n[\s\S]*?\n---\n?/, '');
+  $('body').value = body;
+  $('savePath').textContent = pass.path;
+  dirty = false;
+  drawTools(); drawArtifacts(); drawPassport(pass); drawCompiled(pass);
+  counts();
+}
+
+function counts() {
+  const d = $('f_desc').value.length;
+  const cap = (ctx.harnesses.find((h) => h.id === 'claude-code') || {}).listing;
+  $('descCount').textContent = '— ' + d + ' chars' + (cap && cap.descCap ? ' / ' + cap.descCap : '') + ', paid every session';
+  $('descCount').className = cap && cap.descCap && d > cap.descCap ? 'bad' : 'muted';
+  $('bodyCount').textContent = '— ' + $('body').value.length + ' chars, on invoke';
+}
+
+function drawPassport(p) {
+  const tr = p.cost.transitive || [];
+  const inv = p.cost.invokeTokens + tr.reduce((s, t) => s + t.tokens, 0);
+  $('cost').innerHTML = '<table><tr><th>always-on</th><th>on-invoke</th><th>method</th></tr>' +
+    '<tr><td>' + p.cost.alwaysOnTokens + ' tok</td><td>' + inv + ' tok' + (tr.length ? ' <span class="muted">(incl. ' + tr.map((t) => esc(t.name)).join(', ') + ')</span>' : '') + '</td><td class="muted">' + p.cost.method + '</td></tr></table>';
+  $('matrix').innerHTML = '<div style="margin:9px 0">' + p.matrix.map((m) =>
+    '<span class="pill ' + (m.allowlist === 'restrict' ? 'ok' : m.allowlist === 'grant' ? 'warn' : 'bad') + '">' + esc(m.harness) + ' = ' + esc(m.allowlist) + '</span>').join('') + '</div>';
+  $('findings').innerHTML = p.findings.length ? p.findings.map((f) =>
+    '<div class="find ' + esc(f.severity) + '"><span class="code">' + esc(f.code) + (f.harness ? ' [' + esc(f.harness) + ']' : '') + (f.line ? ':' + f.line : '') + '</span><br>' + esc(f.message) + '</div>').join('')
+    : '<div class="ok">no findings</div>';
+}
+
+function drawCompiled(p) {
+  if (!p.compiled || !p.compiled.length) { $('compiledList').innerHTML = '<div class="muted">compile previews need a TAUT pack and engine</div>'; return; }
+  $('compiledList').innerHTML = p.compiled.map((c) =>
+    '<details><summary><b>' + esc(c.harness) + '</b> → ' + esc(c.id) + ' <span class="muted">' + c.bytes + ' bytes · ' + esc(c.transform) + '</span></summary>' +
+    c.degradations.map((d) => '<div class="warn" style="margin:5px 0;font-size:11.5px">' + esc(d.id) + ': ' + esc(d.text) + '</div>').join('') +
+    '<pre>' + esc(c.content) + '</pre></details>').join('');
+}
+
+// ── save ──────────────────────────────────────────────────────────
+function frontmatterFromForm() {
+  const fm = {};
+  fm.name = $('f_name').value.trim();
+  if ($('f_desc').value.trim()) fm.description = $('f_desc').value.trim().replace(/\s*\n\s*/g, ' ');
+  if ($('f_hint').value.trim()) fm['argument-hint'] = $('f_hint').value.trim();
+  const isAgent = current && current.kind === 'agent';
+  if (!isAgent) {
+    if (!$('f_userInv').checked) fm['user-invocable'] = false;
+    if ($('f_noModel').checked) fm['disable-model-invocation'] = true;
+  }
+  if (selectedTools.length) fm[isAgent ? 'tools' : 'allowed-tools'] = selectedTools;
+  if ($('f_model').value.trim()) fm.model = $('f_model').value.trim();
+  if ($('f_effort').value.trim()) fm.effort = $('f_effort').value.trim();
+  if (ctx.taut && !isAgent) {
+    const list = (id) => $(id).value.split(',').map((x) => x.trim()).filter(Boolean);
+    const w = {};
+    if (list('f_agents').length) w.agents = list('f_agents');
+    if (list('f_mcp').length) w.mcp = list('f_mcp');
+    if (list('f_requires').length) w.requires = list('f_requires');
+    if (list('f_repos').length) w.repos = list('f_repos');
+    if ($('f_role').value.trim()) w.role = $('f_role').value.trim();
+    if (Object.keys(w).length) fm.metadata = { taut: w };
+  }
+  return fm;
+}
+
+$('save').onclick = async () => {
+  try {
+    const r = await api('/api/save', {
+      kind: current ? current.kind : 'skill',
+      name: $('f_name').value.trim(),
+      path: current ? current.path : null,
+      project: ctx.taut && ctx.taut.deployment ? null : null,
+      frontmatter: frontmatterFromForm(),
+      body: $('body').value,
+    });
+    toast((r.created ? 'created ' : 'saved ') + r.path);
+    await loadContext();
+    current = r.passport; drawPassport(r.passport); drawCompiled(r.passport);
+    $('savePath').textContent = r.path; dirty = false;
+  } catch (e) { toast(e.message, true); }
+};
+$('revert').onclick = () => { if (current) openArtifact(current.path); };
+
+$('newSkill').onclick = () => newArtifact('skill');
+$('newAgent').onclick = () => newArtifact('agent');
+function newArtifact(kind) {
+  current = { kind, path: null, name: '', compiled: [] };
+  $('f_name').value = ''; $('f_desc').value = ''; $('f_hint').value = '';
+  $('f_userInv').checked = true; $('f_noModel').checked = kind === 'skill';
+  $('f_model').value = ''; $('f_effort').value = '';
+  $('f_agents').value = ''; $('f_mcp').value = ''; $('f_requires').value = ''; $('f_repos').value = ''; $('f_role').value = '';
+  selectedTools = ['Read', 'Glob', 'Grep'];
+  $('body').value = '# \n\nThe method.\n';
+  $('savePath').textContent = '(new — saved into ' + (kind === 'agent' ? 'agents/' : 'skills/<name>/') + ')';
+  drawTools(); $('findings').innerHTML = '<div class="muted">save to lint</div>';
+  $('cost').innerHTML = ''; $('matrix').innerHTML = ''; $('compiledList').innerHTML = '';
+  counts();
+}
+
+$('addTool').onclick = () => {
+  const base = $('toolPick').value; const scope = $('toolScope').value.trim();
+  const entry = scope ? base + '(' + scope + ')' : base;
+  if (!selectedTools.includes(entry)) selectedTools.push(entry);
+  $('toolScope').value = ''; dirty = true; drawTools();
+};
+for (const id of ['f_desc', 'body']) $(id).addEventListener('input', () => { dirty = true; counts(); });
+
+// ── tabs ──────────────────────────────────────────────────────────
+for (const t of document.querySelectorAll('.tab')) t.onclick = () => {
+  for (const x of document.querySelectorAll('.tab')) x.classList.toggle('active', x === t);
+  for (const name of ['passport', 'compiled', 'bench']) $('tab-' + name).style.display = name === t.dataset.tab ? 'block' : 'none';
+};
+
+// ── bench ─────────────────────────────────────────────────────────
+$('runBench').onclick = async () => {
+  if (!current || !current.path) return toast('save the artifact first', true);
+  $('benchLog').style.display = 'block'; $('benchLog').textContent = ''; $('benchMatrix').innerHTML = '';
+  $('runBench').disabled = true;
+  try {
+    const { id } = await api('/api/test', {
+      path: current.path, level: +$('benchLevel').value, runs: +$('benchRuns').value,
+      maxCost: $('benchCost').value.trim() === '' ? null : +$('benchCost').value, harnesses: benchSel,
+    });
+    const es = new EventSource('/api/test/' + id + '/events?token=' + TOKEN);
+    es.onmessage = (ev) => {
+      const e = JSON.parse(ev.data);
+      $('benchLog').textContent += e.kind.padEnd(7) + ' ' + e.text + '\n';
+      $('benchLog').scrollTop = $('benchLog').scrollHeight;
+    };
+    es.addEventListener('end', (ev) => {
+      es.close(); $('runBench').disabled = false;
+      const { result, error } = JSON.parse(ev.data);
+      if (error) return toast(error, true);
+      if (result) drawBenchMatrix(result);
+    });
+    es.onerror = () => { es.close(); $('runBench').disabled = false; };
+  } catch (e) { $('runBench').disabled = false; toast(e.message, true); }
+};
+
+function drawBenchMatrix(r) {
+  const pct = (x) => x === null ? '—' : Math.round(x * 100) + '%';
+  let html = '<table><tr><th>harness</th><th>trigger</th><th>control</th><th>obedience</th></tr>';
+  for (const rep of r.reports) {
+    if (!rep.available) { html += '<tr><td>' + esc(rep.harness) + '</td><td colspan="3" class="muted">' + esc(rep.reason || 'unavailable') + '</td></tr>'; continue; }
+    const ob = rep.obedience;
+    html += '<tr><td>' + esc(rep.harness) + '</td>' +
+      '<td class="' + (rep.trigger.fireRate ? 'ok' : 'bad') + '">' + pct(rep.trigger.fireRate) + (rep.trigger.lostTo.length ? ' <span class="warn">lost to ' + esc(rep.trigger.lostTo.join(', ')) + '</span>' : '') + '</td>' +
+      '<td class="' + (rep.trigger.controlClean === false ? 'bad' : 'ok') + '">' + (rep.trigger.controlClean === null ? '—' : rep.trigger.controlClean ? 'clean' : 'FIRED') + '</td>' +
+      '<td>' + (ob ? (ob.violations.length ? '<span class="bad">' + ob.violations.length + ' outside</span>' : '<span class="ok">inside</span>') + ' <span class="muted">[' + esc(ob.enforcement) + ']</span>' : '—') + '</td></tr>';
+    if (ob && ob.violations.length) html += '<tr><td></td><td colspan="3" class="warn" style="font-size:11px">' + esc(ob.violations.join(' · ')) + '</td></tr>';
+  }
+  html += '</table><div class="muted" style="margin-top:6px">L1 ' + (r.compiled.ok ? '<span class="ok">ok</span>' : '<span class="bad">FAIL</span>') + ' ' + esc(r.compiled.detail) + '</div>';
+  $('benchMatrix').innerHTML = html;
+}
+
+$('validate').onclick = async () => {
+  $('validate').disabled = true; $('benchLog').style.display = 'block'; $('benchLog').textContent = 'running…';
+  try {
+    const r = await api('/api/validate', {});
+    $('benchLog').textContent = r.command + '\n\n' + r.output;
+    toast(r.command + (r.ok ? ' — green' : ' — FAILED'), !r.ok);
+  } catch (e) { toast(e.message, true); } finally { $('validate').disabled = false; }
+};
+
+window.addEventListener('beforeunload', (e) => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
+loadContext().catch((e) => toast(e.message, true));
+</script>
+</body></html>

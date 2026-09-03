@@ -20,6 +20,7 @@ saut cost  <skills or agents…>   always-on vs on-invoke token passport, budget
 saut passport <…>                lint + cost + harness matrix (+ compiled previews) as one JSON
 saut preview <name> [dir]        TAUT packs: the compiled bytes of one artifact per harness
 saut test  <skill or agent>      the bench: compile → does it trigger → does it obey the allowlist
+saut studio [dir]               the local UI over all of it: form + body, passport, bench, validate
 saut harnesses                   what each harness enforces, degrades, and lists
 saut tools [dir] [--live]        the tool names an allowlist may cite (builtin + MCP catalog)
 ```
@@ -164,6 +165,20 @@ ran that the declaration never covered; on Codex and opencode that is the record
 degradation, measured rather than asserted). Full detail, isolation and cost controls:
 [docs/BENCH.md](docs/BENCH.md).
 
+## The Studio
+
+```bash
+saut studio .
+```
+
+One local page over the same functions: the form writes frontmatter through the emitter (so it
+compiles), the passport shows cost, the enforcement matrix and every finding as you type, the
+Compiled tab shows the exact per-harness bytes for a TAUT pack, and the Bench tab runs L1–L3
+with the events streaming live. **Validate pack** runs the pack's own `tools/validate-pack.sh`.
+
+Loopback only, per-session token in a custom header, Origin and Host checks, writes contained
+under the root — the TAUT panel's contour. Details: [docs/STUDIO.md](docs/STUDIO.md).
+
 ## Roadmap
 
 - **P0** ✓ — core: parser + emitter, harness registry, tool registry (+ live), `lint`, `cost`,
@@ -172,7 +187,8 @@ degradation, measured rather than asserted). Full detail, isolation and cost con
   compile preview + degradations from the engine (`taut render`), `saut lint` in pack CI.
 - **P2** ✓ — the bench: `saut test` L1 compile · L2 trigger (explicit / implicit / control,
   with the lost-to diagnostic) · L3 obedience, across Claude Code, Codex and opencode.
-- **P3** — Studio: a loopback UI over the same verbs (form + editor, passport, run button).
+- **P3** ✓ — Studio: the loopback UI over the same verbs — form + body, passport, compiled
+  previews, the bench with live SSE, pack validation.
 - **P4** — scenario graders (Claude Code `plugin eval` case format + agentskills `evals.json`),
   `--scan` via an installed security scanner, usage from TAUT telemetry.
 

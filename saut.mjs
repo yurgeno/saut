@@ -15,6 +15,7 @@
 //   cost.mts         always-on / on-invoke token passport (estimate | --exact)
 //   adapters/taut.mts TAUT packs: engine-parsed frontmatter, wiring vs catalog, compile preview
 //   bench/*.mts      the test bench: cases, scratch workspaces, runners, obedience, orchestrator
+//   studio/*         the loopback UI (server.mts + studio.html) over the same library functions
 //   commands.mts     lint / cost / passport / preview / test / harnesses / tools
 import process from 'node:process';
 
@@ -25,7 +26,7 @@ if (nodeMajor < 24) {
 }
 
 const { SautError } = await import('./lib/util.mts');
-const { VERSION, cmdCost, cmdHarnesses, cmdLint, cmdPassport, cmdPreview, cmdTest, cmdTools } = await import('./lib/commands.mts');
+const { VERSION, cmdCost, cmdHarnesses, cmdLint, cmdPassport, cmdPreview, cmdStudio, cmdTest, cmdTools } = await import('./lib/commands.mts');
 
 function parseArgs(argv) {
   const opts = { _: [], harness: [] };
@@ -51,6 +52,7 @@ function parseArgs(argv) {
     else if (a === '--out') opts.out = argv[++i];
     else if (a === '--keep') opts.keep = true;
     else if (a === '--timeout') opts.timeout = Number(argv[++i]);
+    else if (a === '--port') opts.port = Number(argv[++i]);
     else if (a === '--help' || a === '-h') opts.help = true;
     else if (a.startsWith('--')) { process.stderr.write(`saut: unknown option ${a}\n`); process.exit(2); }
     else opts._.push(a);
@@ -70,6 +72,7 @@ Commands
   passport [paths…]    lint + cost + harness matrix as one JSON document
   harnesses            the capability registry (what each harness enforces / degrades)
   tools [dir]          the tool registry: builtin per harness + MCP catalog (+ --live)
+  studio [dir]         the local UI over all of the above: form + editor, passport, bench, publish
   preview <name> [dir] TAUT packs: the compiled bytes of one skill/agent per harness (engine render)
   test <skill|agent>   the bench: L1 compile into a scratch workspace · L2 trigger (does each
                        harness fire the skill — explicit / implicit / control) · L3 obedience
@@ -98,6 +101,9 @@ Bench (saut test)
   --landscape <dir>    TAUT: a real landscape, COPIED into the scratch (default: stub repos)
   --out <dir>          results (default <artifact>/evals/results/<timestamp>/) · --keep scratch
   --timeout <s>        per run (default 300)
+
+Studio
+  --port <n>           bind port (default: an ephemeral one); always 127.0.0.1 only
   Isolation: scratch workspace, Claude dontAsk + the artifact's grant minus the shell, Codex
   read-only sandbox, opencode deny-by-default permissions. Cases: <skill>/evals/**/prompt.md
   (Claude Code plugin-eval layout; SAUT reads expect: fire|no-fire and invocation:) or three
@@ -108,7 +114,7 @@ Exit codes: 0 clean/within budget/bench passed · 1 findings/over budget/bench f
 
 const opts = parseArgs(process.argv.slice(2));
 const cmd = opts._.shift();
-const table = { lint: cmdLint, cost: cmdCost, passport: cmdPassport, preview: cmdPreview, test: cmdTest, harnesses: cmdHarnesses, tools: cmdTools };
+const table = { lint: cmdLint, cost: cmdCost, passport: cmdPassport, preview: cmdPreview, test: cmdTest, studio: cmdStudio, harnesses: cmdHarnesses, tools: cmdTools };
 if (!cmd || opts.help || cmd === 'help') { process.stdout.write(HELP); process.exit(0); }
 if (cmd === 'version' || cmd === '--version') { process.stdout.write(`${VERSION}\n`); process.exit(0); }
 if (!table[cmd]) { process.stderr.write(`saut: unknown command "${cmd}"\n\n${HELP}`); process.exit(2); }
