@@ -1,0 +1,39 @@
+cff-version: 1.2.0
+message: >-
+  If you use SAUT, or build on the concepts it implements — cross-harness
+  privilege semantics for agent skills, the always-on/on-invoke cost
+  passport, and trigger/obedience measurement across harnesses — please
+  cite it as below.
+title: "SAUT — Skill Assurance Under Trust"
+type: software
+authors:
+  - given-names: Yuriy
+    family-names: Orlov
+    email: yuriy.orlov@undertrust.dev
+abstract: >-
+  SAUT is an assurance tool for AI-agent skills. It reads a skill or
+  subagent authored to the Agent Skills format and reports what no single
+  harness will tell you: per harness, whether the declared tool allowlist
+  is a restriction, a pre-approval grant, informational prose or a field
+  dropped on render; what the artifact costs in every session versus on
+  invocation; and — by compiling it into a scratch workspace and running
+  each harness headlessly — whether the harness actually fires it and
+  whether the run stays inside the declaration it made. The recorded
+  semantics is data with provenance, and the bench measures it rather
+  than asserting it.
+keywords:
+  - ai-agents
+  - agentic-coding
+  - agent-skills
+  - skill-assurance
+  - static-analysis
+  - evaluation
+  - token-budget
+  - least-privilege
+  - claude-code
+  - codex
+  - opencode
+repository-code: "https://github.com/yurgeno/saut"
+license: Apache-2.0
+version: 0.5.0
+date-released: '2026-09-03'

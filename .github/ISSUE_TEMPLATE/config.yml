@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/yurgeno/saut/blob/master/SECURITY.md
+    about: Studio token guard, bench isolation, path traversal, injection — report privately, not as an issue.

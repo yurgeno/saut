@@ -28,39 +28,62 @@ if (nodeMajor < 24) {
 const { SautError } = await import('./lib/util.mts');
 const { VERSION, cmdCost, cmdHarnesses, cmdLint, cmdPassport, cmdPreview, cmdStudio, cmdTest, cmdTools } = await import('./lib/commands.mts');
 
+// Flags are declared, not hand-rolled per branch: a missing value, a non-numeric value or a
+// number out of range is a USAGE error (exit 2) with a message naming the flag — never an
+// undefined that turns into NaN and silently changes behaviour three modules later.
+const BOOL_FLAGS = new Set(['--json', '--sarif', '--live', '--exact', '--strict', '--no-taut', '--scan', '--keep']);
+const VALUE_FLAGS = {
+  '--catalog': 'catalog', '--budget': 'budget', '--taut': 'taut', '--deployment': 'deployment',
+  '--scanner': 'scanner', '--workspace': 'workspace', '--since': 'since', '--until': 'until',
+  '--model': 'model', '--judge-model': 'judgeModel', '--landscape': 'landscape', '--case': 'case',
+  '--out': 'out',
+};
+const NUMBER_FLAGS = {
+  '--level': { key: 'level', min: 1, max: 4, int: true },
+  '--runs': { key: 'runs', min: 1, max: 100, int: true },
+  '--max-cost': { key: 'maxCost', min: 0, max: 10000 },
+  '--timeout': { key: 'timeout', min: 1, max: 86400, int: true },
+  '--port': { key: 'port', min: 0, max: 65535, int: true },
+};
+const BOOL_KEY = {
+  '--json': 'json', '--sarif': 'sarif', '--live': 'live', '--exact': 'exact', '--strict': 'strict',
+  '--no-taut': 'noTaut', '--scan': 'scan', '--keep': 'keep',
+};
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+function usage(msg) {
+  process.stderr.write(`saut: ${msg}\n`);
+  process.exit(2);
+}
+
 function parseArgs(argv) {
   const opts = { _: [], harness: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === '--json') opts.json = true;
-    else if (a === '--sarif') opts.sarif = true;
-    else if (a === '--harness') opts.harness.push(...argv[++i].split(','));
-    else if (a === '--catalog') opts.catalog = argv[++i];
-    else if (a === '--live') opts.live = true;
-    else if (a === '--exact') opts.exact = true;
-    else if (a === '--budget') opts.budget = argv[++i];
-    else if (a === '--strict') opts.strict = true;
-    else if (a === '--taut') opts.taut = argv[++i];
-    else if (a === '--deployment') opts.deployment = argv[++i];
-    else if (a === '--no-taut') opts.noTaut = true;
-    else if (a === '--scan') opts.scan = true;
-    else if (a === '--scanner') opts.scanner = argv[++i];
-    else if (a === '--workspace') opts.workspace = argv[++i];
-    else if (a === '--since') opts.since = argv[++i];
-    else if (a === '--until') opts.until = argv[++i];
-    else if (a === '--level') opts.level = Number(argv[++i]);
-    else if (a === '--runs') opts.runs = Number(argv[++i]);
-    else if (a === '--model') opts.model = argv[++i];
-    else if (a === '--judge-model') opts.judgeModel = argv[++i];
-    else if (a === '--max-cost') opts.maxCost = Number(argv[++i]);
-    else if (a === '--landscape') opts.landscape = argv[++i];
-    else if (a === '--case') opts.case = argv[++i];
-    else if (a === '--out') opts.out = argv[++i];
-    else if (a === '--keep') opts.keep = true;
-    else if (a === '--timeout') opts.timeout = Number(argv[++i]);
-    else if (a === '--port') opts.port = Number(argv[++i]);
-    else if (a === '--help' || a === '-h') opts.help = true;
-    else if (a.startsWith('--')) { process.stderr.write(`saut: unknown option ${a}\n`); process.exit(2); }
+    const value = () => {
+      const v = argv[++i];
+      if (v === undefined || (v.startsWith('--') && v.length > 2)) usage(`${a} needs a value`);
+      return v;
+    };
+    if (BOOL_FLAGS.has(a)) opts[BOOL_KEY[a]] = true;
+    else if (a === '--harness') {
+      const ids = value().split(',').map((x) => x.trim()).filter(Boolean);
+      if (!ids.length) usage('--harness needs at least one id');
+      opts.harness.push(...ids);
+    } else if (VALUE_FLAGS[a]) {
+      const v = value();
+      if ((a === '--since' || a === '--until') && !DAY.test(v)) usage(`${a}: expected YYYY-MM-DD, got "${v}"`);
+      opts[VALUE_FLAGS[a]] = v;
+    } else if (NUMBER_FLAGS[a]) {
+      const { key, min, max, int } = NUMBER_FLAGS[a];
+      const raw = value();
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < min || n > max || (int && !Number.isInteger(n)))
+        usage(`${a}: expected ${int ? 'an integer' : 'a number'} in ${min}..${max}, got "${raw}"`);
+      opts[key] = n;
+    } else if (a === '--help' || a === '-h') opts.help = true;
+    else if (a === '--version' || a === '-V') opts.version = true;
+    else if (a.startsWith('-') && a !== '-') usage(`unknown option ${a}`);
     else opts._.push(a);
   }
   return opts;
@@ -96,6 +119,7 @@ Options
   --workspace <dir>    a compiled TAUT workspace: adds the USED column from its local telemetry
                        (--since / --until YYYY-MM-DD)
   --json | --sarif     machine output (sarif: lint only)
+  -h, --help · -V, --version
   --strict             lint exits 1 on medium findings too (default: high only)
 
 TAUT packs (auto-detected: pack.json + skills/ or <project>/deployment.json)
@@ -127,8 +151,8 @@ Exit codes: 0 clean/within budget/bench passed · 1 findings/over budget/bench f
 const opts = parseArgs(process.argv.slice(2));
 const cmd = opts._.shift();
 const table = { lint: cmdLint, cost: cmdCost, passport: cmdPassport, preview: cmdPreview, test: cmdTest, studio: cmdStudio, harnesses: cmdHarnesses, tools: cmdTools };
+if (opts.version || cmd === 'version') { process.stdout.write(`${VERSION}\n`); process.exit(0); }
 if (!cmd || opts.help || cmd === 'help') { process.stdout.write(HELP); process.exit(0); }
-if (cmd === 'version' || cmd === '--version') { process.stdout.write(`${VERSION}\n`); process.exit(0); }
 if (!table[cmd]) { process.stderr.write(`saut: unknown command "${cmd}"\n\n${HELP}`); process.exit(2); }
 try {
   process.exit(await table[cmd](opts));

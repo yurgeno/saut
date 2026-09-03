@@ -1,0 +1,28 @@
+# The suite is the project's own claim of integrity — it must run on every push.
+# Node 24 is the floor: the core is TypeScript executed natively (type stripping).
+# The whole suite is offline: bench and judge tests drive fake harness binaries on PATH,
+# so CI needs no credentials and spends nothing.
+name: test
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      # Typecheck (tsc --noEmit) + the behavioural suite, exactly as documented.
+      - run: npm test

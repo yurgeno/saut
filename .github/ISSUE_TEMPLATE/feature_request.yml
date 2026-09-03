@@ -1,0 +1,38 @@
+name: Feature request
+description: A rule, a harness, a grader, or a surface that should exist
+labels: [enhancement]
+body:
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind
+      options:
+        - A lint rule
+        - A harness (registry entry, and a runner if it can be driven headlessly)
+        - A grader type
+        - Something in the Studio
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What goes wrong today, on a real skill. Not the solution yet.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: >-
+        For a rule: what it would have caught, and where the claim comes from (a review
+        finding, harness documentation, published research). For a harness: the docs that
+        say what it enforces, degrades and lists. SAUT rules cite their precedent.
+    validations:
+      required: true
+  - type: textarea
+    id: shape
+    attributes:
+      label: What it might look like
+      description: Optional — the output you would want to see.

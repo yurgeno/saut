@@ -1,0 +1,60 @@
+name: Bug report
+description: A wrong finding, a wrong cost, or a bench that misreports
+labels: [bug]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options: [lint, cost, bench (saut test), studio, TAUT adapter, CLI / other]
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: The exact command and its output.
+      placeholder: |
+        saut lint skills/my-skill
+        → high  dead-privilege:5 — "Bash" is granted but the body never mentions it
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: artifact
+    attributes:
+      label: The artifact
+      description: >-
+        The smallest SKILL.md (or agent file) that shows it — frontmatter included.
+        Redact anything private; a reduced case is more useful than a real one.
+      render: markdown
+  - type: input
+    id: version
+    attributes:
+      label: SAUT release or commit
+      placeholder: v0.5.0
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: Node version and OS
+      placeholder: node 24.2.0 · macOS 15
+    validations:
+      required: true
+  - type: input
+    id: harness
+    attributes:
+      label: Harness(es) involved
+      placeholder: claude-code, codex
+  - type: markdown
+    attributes:
+      value: >-
+        **Found a way past the Studio token guard, out of a bench scratch workspace, or an
+        input that reaches a shell?** That is a vulnerability — report it privately per
+        [SECURITY.md](../blob/master/SECURITY.md) instead of filing an issue.
