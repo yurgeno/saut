@@ -9,7 +9,7 @@ import path from 'node:path';
 import { grade, gradeAll, loadGraders } from '../lib/bench/graders.mts';
 import { loadCases } from '../lib/bench/cases.mts';
 import { discover } from '../lib/skill.mts';
-import { PACK } from './helpers.mjs';
+import { copySkill, PACK } from './helpers.mjs';
 
 const trace = {
   harness: 'claude-code', run: 1, status: 'ok', listed: true, competing: 0, fired: 'tool', firedOther: [],
@@ -100,7 +100,8 @@ test('unknown grader type fails loudly; gradeAll scores the set', async () => {
 });
 
 test('graders load from a case folder; agentskills evals.json imports as cases with assertions', async () => {
-  const [skill] = await discover([path.join(PACK, 'skills', 'fx-clean')]);
+  const copy = await copySkill('fx-clean');            // the shared fixture stays read-only
+  const [skill] = await discover([copy.dir]);
   const dir = path.join(skill.dir, 'evals');
   await fs.mkdir(path.join(dir, 'case-a', 'graders'), { recursive: true });
   await fs.writeFile(path.join(dir, 'case-a', 'prompt.md'), '---\nname: case-a\n---\nDo it.\n');
@@ -118,5 +119,5 @@ test('graders load from a case folder; agentskills evals.json imports as cases w
     assert.deepEqual(graders.map((x) => x.type).sort(), ['file_exists', 'regex']);
     const scored = await gradeAll(graders, ctx());
     assert.equal(scored.score, 1);
-  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+  } finally { await copy.cleanup(); }
 });

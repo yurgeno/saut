@@ -2,6 +2,8 @@
 // runs tsc first). The generic fixture pack (test/fixtures/pack) carries one artifact per
 // rule; the suites never touch real content.
 import { execFile } from 'node:child_process';
+import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
@@ -22,3 +24,14 @@ export async function saut(args, opts = {}) {
 }
 
 export const codes = (diags, file) => diags.filter((x) => !file || x.path.endsWith(file)).map((x) => x.code);
+
+// node --test runs suite FILES in parallel processes, so the shared fixture pack is
+// READ-ONLY: a test that needs to add an evals/ folder or edit frontmatter takes its own
+// copy first. Returns the copied skill directory; the caller removes it when done.
+export async function copySkill(name) {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), `saut-fx-${name}-`));
+  const target = path.join(dir, 'skills', name);
+  await fs.cp(path.join(PACK, 'skills', name), target, { recursive: true });
+  await fs.cp(path.join(PACK, 'catalog'), path.join(dir, 'catalog'), { recursive: true });
+  return { root: dir, dir: target, skillFile: path.join(target, 'SKILL.md'), cleanup: () => fs.rm(dir, { recursive: true, force: true }) };
+}

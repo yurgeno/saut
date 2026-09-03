@@ -12,7 +12,7 @@ import { allowed, obedience } from '../lib/bench/obedience.mts';
 import { neutralName, renderPrompt } from '../lib/bench/runners.mts';
 import { loadHarnesses } from '../lib/caps.mts';
 import { discover, parseToolRef } from '../lib/skill.mts';
-import { PACK, REPO } from './helpers.mjs';
+import { copySkill, PACK, REPO } from './helpers.mjs';
 
 const harnesses = [...(await loadHarnesses()).values()];
 const runnable = harnesses.filter((h) => h.runner);
@@ -46,16 +46,18 @@ test('cases: generated explicit/implicit/control, and authored evals/**/prompt.m
   assert.deepEqual(auto.map((c) => c.name), ['explicit', 'implicit', 'control']);
   assert.deepEqual(auto.map((c) => c.expect), ['fire', 'fire', 'no-fire']);
   assert.ok(!auto[1].prompt.includes('Invoke:'), 'the invocation sentence is stripped from the implicit task');
-  const dir = path.join(skill.dir, 'evals', 'c1');
-  await fs.mkdir(dir, { recursive: true });
-  await fs.writeFile(path.join(dir, 'prompt.md'), '---\nname: authored\nexpect: fire\ninvocation: implicit\nmax_turns: 3\n---\nDo the thing.\n');
+  // the shared fixture is read-only (parallel suites) — author the case in a copy
+  const copy = await copySkill('fx-clean');
+  const [copied] = await discover([copy.dir]);
+  await fs.mkdir(path.join(copy.dir, 'evals', 'c1'), { recursive: true });
+  await fs.writeFile(path.join(copy.dir, 'evals', 'c1', 'prompt.md'), '---\nname: authored\nexpect: fire\ninvocation: implicit\nmax_turns: 3\n---\nDo the thing.\n');
   try {
-    const cases = await loadCases(skill);
+    const cases = await loadCases(copied);
     assert.deepEqual(cases.map((c) => c.name), ['authored']);
     assert.equal(cases[0].maxTurns, 3);
     assert.equal(cases[0].prompt, 'Do the thing.');
-    assert.deepEqual((await loadCases(skill, 'nope*')).map((c) => c.name), []);
-  } finally { await fs.rm(path.join(skill.dir, 'evals'), { recursive: true, force: true }); }
+    assert.deepEqual((await loadCases(copied, 'nope*')).map((c) => c.name), []);
+  } finally { await copy.cleanup(); }
 });
 
 test('prompt rendering: explicit invocation uses each harness syntax', () => {

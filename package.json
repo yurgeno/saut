@@ -9,6 +9,10 @@
     "type": "git",
     "url": "https://github.com/yurgeno/saut.git"
   },
+  "bugs": {
+    "url": "https://github.com/yurgeno/saut/issues"
+  },
+  "homepage": "https://github.com/yurgeno/saut#readme",
   "keywords": [
     "ai",
     "ai-agents",
@@ -27,6 +31,15 @@
   "bin": {
     "saut": "./saut.mjs"
   },
+  "files": [
+    "saut.mjs",
+    "lib/",
+    "docs/",
+    "LICENSE",
+    "NOTICE",
+    "README.md",
+    "CHANGELOG.md"
+  ],
   "engines": {
     "node": ">=24"
   },
