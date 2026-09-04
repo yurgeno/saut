@@ -44,7 +44,7 @@
     "node": ">=24"
   },
   "scripts": {
-    "test": "tsc --noEmit && node --test",
+    "test": "tsc --noEmit && node --test \"test/**/*.test.mjs\"",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
