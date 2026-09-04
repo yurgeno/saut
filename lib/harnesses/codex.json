@@ -5,12 +5,27 @@
     "https://developers.openai.com/codex/skills",
     "https://developers.openai.com/codex/agent-configuration/subagents"
   ],
-  "skillsDirs": [".agents/skills"],
+  "skillsDirs": [
+    ".agents/skills"
+  ],
+  "skillInvocation": "read",
   "agentsDir": ".codex/agents",
   "agentFormat": "toml",
-  "builtinTools": ["shell", "apply_patch", "web_search", "view_image", "update_plan"],
+  "builtinTools": [
+    "shell",
+    "apply_patch",
+    "web_search",
+    "view_image",
+    "update_plan"
+  ],
   "legacyTools": [],
-  "frontmatterFields": ["name", "description", "license", "compatibility", "metadata"],
+  "frontmatterFields": [
+    "name",
+    "description",
+    "license",
+    "compatibility",
+    "metadata"
+  ],
   "toolAllowlist": "prose",
   "agentAllowlist": "dropped",
   "denyMechanism": "sandbox policy (`--sandbox read-only|workspace-write`) + approval policy in config.toml; no per-skill tool allowlist. `agents/openai.yaml` `policy.allow_implicit_invocation: false` disables implicit invocation",
@@ -24,12 +39,36 @@
     "note": "name + description drive implicit matching; the full SKILL.md loads when selected regardless of budget"
   },
   "runner": {
-    "cmd": ["codex", "exec", "--json", "--sandbox", "read-only", "--ephemeral", "--skip-git-repo-check", "-C", "{cwd}", "{prompt}"],
+    "cmd": [
+      "codex",
+      "exec",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--skip-git-repo-check",
+      "-C",
+      "{cwd}",
+      "{prompt}"
+    ],
     "trace": "jsonl"
   },
   "degradations": [
-    { "id": "CX-ALLOWLIST-PROSE", "text": "skill `allowed-tools` is informational — Codex enforces nothing per skill; only the sandbox/approval policy restricts" },
-    { "id": "CX-AGENT-TOOLS-DROPPED", "text": "a Claude-style agent `tools:` allowlist has no TOML counterpart and is dropped when rendered to .codex/agents/*.toml" },
-    { "id": "CX-MODEL-INVOCATION", "text": "`disable-model-invocation` has no effect; use `agents/openai.yaml` policy.allow_implicit_invocation: false" }
+    {
+      "id": "CX-ALLOWLIST-PROSE",
+      "text": "skill `allowed-tools` is informational — Codex enforces nothing per skill; only the sandbox/approval policy restricts"
+    },
+    {
+      "id": "CX-AGENT-TOOLS-DROPPED",
+      "text": "a Claude-style agent `tools:` allowlist has no TOML counterpart and is dropped when rendered to .codex/agents/*.toml"
+    },
+    {
+      "id": "CX-MODEL-INVOCATION",
+      "text": "`disable-model-invocation` has no effect; use `agents/openai.yaml` policy.allow_implicit_invocation: false"
+    },
+    {
+      "id": "CX-NO-SLASH-EXPANSION",
+      "text": "a skill has no /slash invocation and no dedicated tool: Codex lists the skills with their paths and the model READS the chosen SKILL.md, so an invocation is observable only as a file read. Measured on codex-cli 0.153.0 — its hook surface carries no prompt-expansion event (pre_tool_use, permission_request, post_tool_use, pre_compact, post_compact, session_start, session_end, user_prompt_submit, subagent_start, subagent_stop, interrupt) and a slash-prefixed prompt reaches user_prompt_submit as literal text."
+    }
   ]
 }

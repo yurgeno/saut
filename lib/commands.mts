@@ -267,7 +267,7 @@ export async function cmdHarnesses(opts: Opts): Promise<number> {
   if (opts.json) { process.stdout.write(JSON.stringify(hs, null, 2) + '\n'); return 0; }
   for (const h of hs) {
     process.stdout.write(`${c.bold(h.id.padEnd(12))} ${h.title}${h.runner ? '' : c.dim('  (registry-only, no runner)')}\n`);
-    process.stdout.write(`  skills: ${h.skillsDirs.join(', ')} · agents: ${h.agentsDir ?? '—'} (${h.agentFormat}) · builtin tools: ${h.builtinTools.length}\n`);
+    process.stdout.write(`  skills: ${h.skillsDirs.join(', ')} (invoked by ${h.skillInvocation ?? 'not measured'}) · agents: ${h.agentsDir ?? '—'} (${h.agentFormat}) · builtin tools: ${h.builtinTools.length}\n`);
     process.stdout.write(`  allowlist: skills=${h.toolAllowlist} agents=${h.agentAllowlist} · deny: ${h.denyMechanism ?? '—'}\n`);
     process.stdout.write(`  listing: ${h.listing.budget}${h.listing.descCap ? ` · desc cap ${h.listing.descCap}` : ''} · mcp names: ${h.mcpToolNaming}\n`);
     for (const dg of h.degradations) process.stdout.write(`  ${c.dim(dg.id)} ${dg.text}\n`);

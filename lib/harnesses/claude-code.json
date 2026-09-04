@@ -12,6 +12,7 @@
   "skillsDirs": [
     ".claude/skills"
   ],
+  "skillInvocation": "tool+slash",
   "agentsDir": ".claude/agents",
   "agentFormat": "md-frontmatter",
   "builtinTools": [

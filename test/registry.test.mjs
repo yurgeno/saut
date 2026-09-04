@@ -53,3 +53,18 @@ test('live tools/list over stdio against a tiny in-process MCP server', async ()
   const tools = await liveTools('fx', { serverKey: 'fx', command: 'node', args: ['-e', script] });
   assert.deepEqual(tools, ['mcp__fx__alpha', 'mcp__fx__beta']);
 });
+
+test('every harness declares how a skill is invoked there, or says the question is unmeasured', async () => {
+  const hs = await loadHarnesses();
+  const legal = new Set(['tool', 'slash', 'tool+slash', 'read', null]);
+  for (const h of hs.values())
+    assert.ok(legal.has(h.skillInvocation), `${h.id}: skillInvocation must be a measured value or null, got ${JSON.stringify(h.skillInvocation)}`);
+  // Measured 2026-09-04: codex has no skill tool and no slash expansion — its hook surface
+  // carries no prompt-expansion event and a slash prompt arrives as literal text, so an
+  // invocation is only observable as a read of SKILL.md. This is the fact that decides
+  // where usage can be counted at all, so it is pinned rather than left to prose.
+  assert.equal(hs.get('codex').skillInvocation, 'read');
+  assert.equal(hs.get('claude-code').skillInvocation, 'tool+slash');
+  assert.ok(hs.get('codex').degradations.some((d) => d.id === 'CX-NO-SLASH-EXPANSION'),
+    'the consequence is recorded as a degradation, with what it was measured against');
+});

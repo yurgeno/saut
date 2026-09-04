@@ -82,6 +82,11 @@ export interface HarnessCaps {
   title: string;
   docs: string[];                       // provenance URLs for the data below
   skillsDirs: string[];                 // where the harness discovers project skills
+  // How a skill is reached on this harness — the fact that decides where its usage can be
+  // observed at all. `read` means there is no skill tool and no slash expansion: the model
+  // opens SKILL.md, so an invocation looks like a file read. null = NOT MEASURED; an absent
+  // answer is recorded as an absent answer rather than left to look like an oversight.
+  skillInvocation: 'tool' | 'slash' | 'tool+slash' | 'read' | null;
   agentsDir: string | null;
   agentFormat: 'md-frontmatter' | 'toml' | 'none';
   builtinTools: string[];               // tool names the harness exposes natively

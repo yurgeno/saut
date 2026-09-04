@@ -3,6 +3,18 @@
 All notable changes to SAUT. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions are [semantic](https://semver.org/) and each release is tagged.
 
+## [0.6.2] — 2026-09-04
+
+### Added
+
+- **Harness registry: how a skill is invoked there.** `skillInvocation` records the fact that
+  decides where usage can be observed at all — `tool+slash` (Claude Code), `read` (Codex: no
+  skill tool and no slash invocation; the model opens `SKILL.md`, so an invocation looks like
+  a file read), or `null` for a harness where the question has not been measured. An explicit
+  null keeps an unanswered question visible instead of letting an absent field read as an
+  oversight. `saut harnesses` prints it; a new `CX-NO-SLASH-EXPANSION` degradation records
+  what it was measured against.
+
 ## [0.6.1] — 2026-09-04
 
 ### Fixed
