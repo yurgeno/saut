@@ -3,6 +3,58 @@
 All notable changes to SAUT. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions are [semantic](https://semver.org/) and each release is tagged.
 
+## [0.6.0] — 2026-09-04
+
+Hardening release after an external code review. No new surface; every change closes a
+defect that was reproduced first.
+
+### Security
+
+- **Studio**: every `/api` route requires the session token — reads carry artifact contents,
+  and the same-origin policy stops a foreign page, not another local process scanning
+  loopback ports. Containment resolves symlinks (a link under the root used to read and
+  write outside it) and writes use `O_NOFOLLOW`. The page is served `X-Frame-Options: DENY`
+  with a `frame-ancestors 'none'` policy, the token is compared in constant time, the pack
+  script runs without a shell and under a timeout, and the bench-job map is bounded.
+- **Spawned MCP servers** see a base environment plus the variable *names* the catalog
+  declares — they used to inherit everything, including API keys, from a catalog
+  auto-discovered out of repository data.
+- **Containment by relative path, not string prefix**: a body referencing
+  `<skill>-secrets/creds.json` used to be read, and under `--exact` its contents would have
+  been sent to the token-counting API. The same fix applies to grader sources and
+  `baseline_file`, which is embedded in a judge prompt.
+- **Bounded reads** (8 MB) on every file SAUT did not write, bounded child stdout, and
+  timeouts on every spawned program.
+
+### Fixed
+
+- `__proto__` in frontmatter crashed the whole run and could set the prototype of the parsed
+  data; every map built from file keys is now null-prototype.
+- A 264 KB skill body took 24.7 s of CPU in the reference scan (nested quantifier); it takes
+  0.2 s.
+- Numbers from an eval spec are range-checked — `timeout_seconds: "5m"` became `NaN` and
+  every run reported a timeout while looking like a real bench.
+- A regex grader carrying `g` answered two different questions in one evaluation.
+- A grader source that cannot be read fails the grader instead of grading the empty string.
+- One unreadable artifact no longer aborts a whole tree walk; symlinked skills are visible;
+  a non-markdown target is reported instead of dropped.
+- `lint` computes one exit code for text, JSON and SARIF alike; SARIF paths are relative.
+- `metadata.taut` branches are compared structurally — key order used to decide a verdict.
+- The harness registry hands out copies; the TAUT adapter's overlay used to rewrite the
+  module cache for every later call in the process.
+- CLI flags are declared: a missing value, a non-numeric or out-of-range number and a
+  malformed date are usage errors naming the flag. `--version` and `-V` work.
+- The suite no longer executes its own fixtures as tests, and no test mutates the shared
+  fixture pack (it was an intermittent failure under parallel runs).
+
+### Added
+
+- `SECURITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `NOTICE`, `CITATION.cff`, this
+  changelog, CI on Linux and macOS, issue and pull-request templates.
+- Adversarial tests: one per reproduced defect above.
+
+[0.6.0]: https://github.com/yurgeno/saut/releases/tag/v0.6.0
+
 ## [0.5.0] — 2026-09-03
 
 First public release.
