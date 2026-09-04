@@ -3,10 +3,10 @@
 // and for opencode a reachable provider) so a missing harness is a reported row, never a crash.
 import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
-import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
 import type { Artifact, HarnessCaps } from '../types.mts';
 import type { BenchCase, ToolCall, Trace } from './types.mts';
+import { onPath } from '../util.mts';
 
 export interface RunSpec {
   harness: HarnessCaps;
@@ -22,19 +22,7 @@ export interface RunSpec {
 
 const DEFAULT_MODEL: Record<string, string | undefined> = { 'claude-code': 'haiku', codex: 'gpt-5.4-mini', opencode: undefined };
 
-// An EMPTY PATH entry means "the current directory" to both path.join and execFile, so a
-// file named `claude` in a scanned repository would look installed and then be executed.
-// Existence is not enough either — the entry must be executable.
-export async function which(bin: string): Promise<boolean> {
-  const exts = process.platform === 'win32' ? (process.env.PATHEXT ?? '.EXE;.CMD;.BAT').split(';') : [''];
-  for (const d of (process.env.PATH ?? '').split(path.delimiter)) {
-    if (!d) continue;
-    for (const ext of exts) {
-      try { await fs.access(path.join(d, bin + ext), fsConstants.X_OK); return true; } catch { /* next */ }
-    }
-  }
-  return false;
-}
+export const which = onPath;
 
 export async function available(h: HarnessCaps): Promise<{ ok: boolean; reason?: string }> {
   if (!h.runner) return { ok: false, reason: 'registry-only harness (no headless runner)' };
@@ -208,6 +196,7 @@ export async function runOpencode(spec: RunSpec): Promise<Trace> {
   t.rawFile = await saveRaw(spec, r.stdout + (r.stderr ? `\n#stderr\n${r.stderr}` : ''));
   if (r.timedOut) { t.status = 'timeout'; return t; }
   const texts: string[] = [];
+  const seenParts = new Set<string>();
   for (const line of r.stdout.split('\n')) {
     if (!line.startsWith('{')) continue;
     let j: any; try { j = JSON.parse(line); } catch { continue; }
@@ -226,7 +215,10 @@ export async function runOpencode(spec: RunSpec): Promise<Trace> {
       const status = String(state.status ?? part.status ?? '');
       const errText = String(state.error ?? part.error ?? '');
       const call: ToolCall = { name: String(toolName), neutral: neutralName(String(toolName)), digest: digestOf(String(toolName), input), denied: /denied|permission|not allowed/i.test(errText), error: status === 'error' && !/denied|permission|not allowed/i.test(errText) };
-      if (!t.tools.some((x) => x.name === call.name && x.digest === call.digest && x.denied === call.denied)) t.tools.push(call);
+      // Every call counts: deduping identical ones undercounts an obedience violation that
+      // happened three times. Only a repeated event for the SAME step is collapsed.
+      const key = `${call.name}|${call.digest}|${status}`;
+      if (!seenParts.has(key)) { seenParts.add(key); t.tools.push(call); }
       if (call.name === 'skill') {
         const invoked = String(input.name ?? input.skill ?? '');
         if (invoked === spec.artifact.name) t.fired = call.denied ? 'blocked' : 'tool';
@@ -234,7 +226,16 @@ export async function runOpencode(spec: RunSpec): Promise<Trace> {
       }
     }
     if (type === 'text' && part.text) texts.push(String(part.text));
-    if (j.tokens || j.usage) { const u = j.tokens ?? j.usage; t.usage = { input: u.input ?? u.input_tokens ?? 0, output: u.output ?? u.output_tokens ?? 0, cacheRead: u.cache?.read ?? 0, cacheWrite: u.cache?.write ?? 0 }; }
+    if (j.tokens || j.usage) {
+      const u = j.tokens ?? j.usage;                 // one event per step — accumulate, do not overwrite
+      const acc = t.usage ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+      t.usage = {
+        input: acc.input + (u.input ?? u.input_tokens ?? 0),
+        output: acc.output + (u.output ?? u.output_tokens ?? 0),
+        cacheRead: acc.cacheRead + (u.cache?.read ?? 0),
+        cacheWrite: acc.cacheWrite + (u.cache?.write ?? 0),
+      };
+    }
   }
   t.finalText = texts.join('').slice(0, 2000);
   if (t.fired === 'unknown') t.fired = t.status !== 'ok' ? 'unknown' : 'none';

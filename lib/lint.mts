@@ -192,7 +192,7 @@ export function lintArtifact(a: Artifact, o: LintOptions): Diagnostic[] {
 
 function dedupe(ds: Diagnostic[]): Diagnostic[] {
   const seen = new Set<string>();
-  return ds.filter((x) => { const k = `${x.code}|${x.harness ?? ''}|${x.message}`; if (seen.has(k)) return false; seen.add(k); return true; });
+  return ds.filter((x) => { const k = `${x.code}|${x.harness ?? ''}|${x.line ?? ''}|${x.message}`; if (seen.has(k)) return false; seen.add(k); return true; });
 }
 
 export const SEVERITY_ORDER: Record<string, number> = { high: 0, medium: 1, low: 2, info: 3 };

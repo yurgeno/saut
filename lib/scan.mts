@@ -10,8 +10,10 @@ import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type { Diagnostic, Severity } from './types.mts';
+import { onPath } from './util.mts';
 
 const run = promisify(execFile);
+const SCAN_TIMEOUT_MS = 10 * 60 * 1000;    // a scanner that hangs must not hang the lint
 
 export interface ScannerSpec {
   id: string;
@@ -74,14 +76,8 @@ export const SCANNERS: ScannerSpec[] = [
 ];
 
 export async function detectScanners(): Promise<ScannerSpec[]> {
-  const dirs = (process.env.PATH ?? '').split(path.delimiter);
-  const fs = await import('node:fs/promises');
   const found: ScannerSpec[] = [];
-  for (const s of SCANNERS) {
-    for (const d of dirs) {
-      try { await fs.access(path.join(d, s.bin)); found.push(s); break; } catch { /* next */ }
-    }
-  }
+  for (const s of SCANNERS) if (await onPath(s.bin)) found.push(s);
   return found;
 }
 
@@ -98,9 +94,9 @@ export async function scan(target: string, opts: { scanner?: string } = {}): Pro
   const notes: string[] = [];
   for (const s of available) {
     try {
-      const r = await run(s.bin, s.args(target), { maxBuffer: 32 * 1024 * 1024 }).catch((e: { stdout?: string; code?: number; message?: string }) => {
+      const r = await run(s.bin, s.args(target), { maxBuffer: 32 * 1024 * 1024, timeout: SCAN_TIMEOUT_MS, killSignal: 'SIGKILL' }).catch((e: { stdout?: string; code?: number; message?: string }) => {
         // scanners exit non-zero WHEN THEY FIND SOMETHING — that is a result, not a failure
-        if (e.stdout && e.stdout.trim().startsWith('{') || e.stdout?.trim().startsWith('[')) return { stdout: e.stdout } as { stdout: string };
+        if (e.stdout && (e.stdout.trim().startsWith('{') || e.stdout.trim().startsWith('['))) return { stdout: e.stdout } as { stdout: string };
         throw new Error(e.message ?? `exit ${e.code}`);
       });
       diagnostics.push(...s.parse(r.stdout, target));

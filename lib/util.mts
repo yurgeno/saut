@@ -1,5 +1,6 @@
 // Small shared helpers: failure type, fs probes, ANSI styling. Node builtins only.
 import fs from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 
@@ -74,6 +75,20 @@ export const c = {
 export function rel(p: string): string {
   const r = path.relative(process.cwd(), p);
   return r && !r.startsWith('..') ? r : p;
+}
+
+// An EMPTY PATH entry means "the current directory" to both path.join and execFile, so a
+// file named `claude` or `snyk` in a scanned repository would look installed and then be
+// executed. Existence is not enough either — the entry must be executable.
+export async function onPath(bin: string): Promise<boolean> {
+  const exts = process.platform === 'win32' ? (process.env.PATHEXT ?? '.EXE;.CMD;.BAT').split(';') : [''];
+  for (const d of (process.env.PATH ?? '').split(path.delimiter)) {
+    if (!d) continue;
+    for (const ext of exts) {
+      try { await fs.access(path.join(d, bin + ext), fsConstants.X_OK); return true; } catch { /* next */ }
+    }
+  }
+  return false;
 }
 
 export function count(n: number, one: string, many = one + 's'): string {

@@ -158,6 +158,11 @@ async function bench(o: BenchOptions, root: string): Promise<BenchResult> {
   };
   await fs.mkdir(o.outDir, { recursive: true });
   await fs.writeFile(path.join(o.outDir, 'matrix.json'), JSON.stringify(result, null, 2) + '\n');
+  // Results land beside the artifact by convention; traces carry full model transcripts, so
+  // mark the directory as generated rather than leaving it for the author to notice in a diff.
+  const resultsRoot = path.dirname(o.outDir);
+  if (path.basename(resultsRoot) === 'results')
+    await fs.writeFile(path.join(resultsRoot, '.gitignore'), '# saut bench runs — generated, not source\n*\n!.gitignore\n').catch(() => undefined);
   return result;
 }
 

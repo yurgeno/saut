@@ -8,7 +8,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Artifact, Budgets, CostLine, HarnessCaps } from './types.mts';
-import { exists, MAX_READ_BYTES, readText } from './util.mts';
+import { exists, fail, MAX_READ_BYTES, readText } from './util.mts';
 
 // Heuristic tokenizer: words ≈ 1 token per ~4.5 letters (min 1), digits ≈ 1 per 3,
 // every punctuation/symbol char ≈ 1, whitespace free. On English markdown this lands
@@ -27,14 +27,16 @@ export function estimateTokens(text: string): number {
 }
 
 export async function exactTokens(text: string, model = 'claude-sonnet-5'): Promise<number> {
+  if (!text) return 0;                       // an empty body costs nothing; asking would report 1
   const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) throw new Error('--exact needs ANTHROPIC_API_KEY in the environment');
+  if (!key) return fail('--exact needs ANTHROPIC_API_KEY in the environment');
   const res = await fetch('https://api.anthropic.com/v1/messages/count_tokens', {
     method: 'POST',
     headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-    body: JSON.stringify({ model, messages: [{ role: 'user', content: text || '.' }] }),
+    body: JSON.stringify({ model, messages: [{ role: 'user', content: text }] }),
+    signal: AbortSignal.timeout(30000),      // a hung request must not hang the verb
   });
-  if (!res.ok) throw new Error(`count_tokens ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  if (!res.ok) return fail(`count_tokens ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const j = (await res.json()) as { input_tokens: number };
   return j.input_tokens;
 }
@@ -113,6 +115,22 @@ export async function costOf(
     transitive,
     method: opts.exact ? 'exact' : 'estimate',
   };
+}
+
+// Budgets arrive from user JSON. A non-number would compare by coercion and silently
+// disable the check it was written to enforce — refuse it by name instead.
+export function validateBudgets(b: unknown, source: string): Budgets {
+  if (b === undefined || b === null) return {};
+  if (typeof b !== 'object' || Array.isArray(b)) return fail(`${source}: budgets must be an object`);
+  const out: Budgets = {};
+  for (const k of ['descriptionChars', 'alwaysOnTokens', 'invokeTokens'] as const) {
+    const v = (b as Record<string, unknown>)[k];
+    if (v === undefined) continue;
+    if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0) return fail(`${source}: budgets.${k} must be a positive number, got ${JSON.stringify(v)}`);
+    out[k] = v;
+  }
+  for (const k of Object.keys(b as object)) if (!['descriptionChars', 'alwaysOnTokens', 'invokeTokens'].includes(k)) return fail(`${source}: unknown budget "${k}"`);
+  return out;
 }
 
 export function overBudget(line: CostLine, a: Artifact, b: Budgets): string[] {

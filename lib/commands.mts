@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadHarnesses } from './caps.mts';
-import { costOf, estimateTokens, overBudget } from './cost.mts';
+import { costOf, estimateTokens, overBudget, validateBudgets } from './cost.mts';
 import { lintArtifact, matrix, sortDiags, toSarif } from './lint.mts';
 import { discoverDetailed, loadAgent } from './skill.mts';
 import { buildRegistry } from './tools.mts';
@@ -30,6 +30,8 @@ export interface Opts {
   exact?: boolean;
   budget?: string;
   strict?: boolean;        // exit 1 on medium too
+  /** internal: a load already performed by the caller (passport reuses lint's) */
+  preloaded?: { artifacts: Artifact[]; harnesses: HarnessCaps[]; taut: TautContext | null };
   taut?: string;           // TAUT engine dir (adapter); auto: SAUT_TAUT_ENGINE, ~/taut, ~/federation
   deployment?: string;     // TAUT deployment (project) when the pack has several
   noTaut?: boolean;        // force plain mode on a TAUT pack
@@ -59,13 +61,18 @@ async function selectHarnesses(opts: Opts): Promise<HarnessCaps[]> {
   return opts.harness.map((id) => all.get(id) ?? fail(`unknown harness "${id}" (known: ${[...all.keys()].join(', ')})`));
 }
 
+async function readJsonFile(file: string): Promise<unknown> {
+  try { return JSON.parse(await readText(file)); }
+  catch (e) { return fail(`${file}: ${(e as Error).message}`); }
+}
+
 async function budgetsFor(targets: string[], opts: Opts): Promise<Budgets> {
-  if (opts.budget) return JSON.parse(await readText(opts.budget)) as Budgets;
+  if (opts.budget) return validateBudgets(await readJsonFile(opts.budget), opts.budget);
   // saut.json next to the first target or in an ancestor
   let dir = path.resolve(targets[0] ?? '.');
   for (let i = 0; i < 6; i++) {
     const p = path.join(dir, 'saut.json');
-    if (await exists(p)) return (JSON.parse(await readText(p)) as { budgets?: Budgets }).budgets ?? {};
+    if (await exists(p)) return validateBudgets((await readJsonFile(p) as { budgets?: unknown })?.budgets, p);
     const up = path.dirname(dir); if (up === dir) break; dir = up;
   }
   return {};
@@ -166,7 +173,10 @@ export async function cmdLint(opts: Opts): Promise<number> {
 
 // ---- cost ---------------------------------------------------------------------------
 export async function runCost(targets: string[], opts: Opts): Promise<{ lines: { line: CostLine; over: string[]; artifact: Artifact }[]; harness: HarnessCaps | null; budgets: Budgets; usage: UsageData | null }> {
-  const { artifacts, harnesses, agentsByName } = await load(targets, opts);
+  const pre = opts.preloaded;
+  const { artifacts, harnesses, agentsByName } = pre
+    ? { artifacts: pre.artifacts, harnesses: pre.harnesses, agentsByName: new Map(pre.artifacts.filter((a) => a.kind === 'agent').map((a) => [a.name, a as AgentArtifact])) }
+    : await load(targets, opts);
   const harness = harnesses.length === 1 ? harnesses[0] : harnesses.find((h) => h.id === 'claude-code') ?? null;
   const budgets = await budgetsFor(targets, opts);
   const lines = [];
@@ -206,8 +216,10 @@ export async function cmdCost(opts: Opts): Promise<number> {
 
 // ---- passport (lint + cost + matrix in one JSON) ---------------------------------------
 export async function cmdPassport(opts: Opts): Promise<number> {
+  // One load: runLint + runCost would each discover the tree, import the TAUT engine and
+  // refine every artifact again.
   const { diagnostics, artifacts, harnesses, taut } = await runLint(opts._, opts);
-  const { lines } = await runCost(opts._, opts);
+  const { lines } = await runCost(opts._, { ...opts, preloaded: { artifacts, harnesses, taut } });
   const out = [];
   for (const a of artifacts) {
     const compiled: (Omit<TautPreview, 'content'> & { tokens: number })[] = taut
