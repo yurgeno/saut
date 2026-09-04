@@ -114,7 +114,15 @@ counts through the Claude token-counting API. Budgets (`descriptionChars`, `alwa
 `invokeTokens`) turn the passport into a gate.
 
 Cost and usage together are the point: a skill that spends its always-on tokens in every
-session and was invoked zero times in six days is the one to compress or drop.
+session and never fires is the one to compress or drop.
+
+A zero in `used` is only evidence when the counting was honest, so SAUT states the limits of
+its own measurement. Self-test rows — a workspace's integrity probe invoking the gate out of
+band — are excluded and counted separately rather than credited to whichever skill they
+probed. And telemetry written before the workspace's gate recorded each invocation path
+cannot see direct `/slash` invocations at all; since a skill declaring
+`disable-model-invocation: true` is reachable by no other path, SAUT says so out loud
+instead of printing a zero that reads as "nobody uses this".
 
 ## Harness registry
 

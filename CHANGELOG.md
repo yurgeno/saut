@@ -3,6 +3,22 @@
 All notable changes to SAUT. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions are [semantic](https://semver.org/) and each release is tagged.
 
+## [0.6.1] — 2026-09-04
+
+### Fixed
+
+- **Usage was counting the wrong rows.** A workspace's own integrity self-test invokes the
+  gate out of band against the first skill in its manifest; those rows were indistinguishable
+  from real invocations, so a routinely checked workspace showed a large invented count on
+  one arbitrary skill. They are now excluded and reported as a separate `probes` figure —
+  by their explicit marker on current engines, and on older files by the reserved probe name
+  and the row the same self-test wrote in the same second.
+- **A zero no longer overstates itself.** Telemetry written before the gate labelled each
+  invocation path never recorded direct `/slash` invocations — the only path by which a skill
+  with `disable-model-invocation: true` can be reached. `saut cost --workspace` now detects
+  such files and says the zeros mean "not recorded" rather than "unused". `--json` carries
+  `usage.probes` and `usage.pathsRecorded`.
+
 ## [0.6.0] — 2026-09-04
 
 Hardening release after an external code review. No new surface; every change closes a

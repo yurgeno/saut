@@ -192,7 +192,7 @@ const k = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
 
 export async function cmdCost(opts: Opts): Promise<number> {
   const { lines, harness, budgets, usage } = await runCost(opts._, opts);
-  if (opts.json) { process.stdout.write(JSON.stringify({ version: VERSION, harness: harness?.id ?? null, budgets, usage: usage ? { workspace: usage.workspace, days: usage.days, from: usage.from, to: usage.to } : null, lines: lines.map((l) => ({ ...l.line, over: l.over, usage: usageFor(usage, l.artifact.name) })) }, null, 2) + '\n'); return lines.some((l) => l.over.length) ? 1 : 0; }
+  if (opts.json) { process.stdout.write(JSON.stringify({ version: VERSION, harness: harness?.id ?? null, budgets, usage: usage ? { workspace: usage.workspace, days: usage.days, from: usage.from, to: usage.to, probes: usage.probes, pathsRecorded: usage.pathsRecorded } : null, lines: lines.map((l) => ({ ...l.line, over: l.over, usage: usageFor(usage, l.artifact.name) })) }, null, 2) + '\n'); return lines.some((l) => l.over.length) ? 1 : 0; }
   if (!lines.length) { process.stdout.write('no skills or agents found\n'); return 1; }
   const method = lines[0].line.method;
   process.stdout.write(`${c.bold('cost passport')} ${c.dim(`(${method}${harness ? `, listing per ${harness.id}` : ''})`)}\n`);
@@ -209,7 +209,11 @@ export async function cmdCost(opts: Opts): Promise<number> {
   }
   process.stdout.write(`  ${'TOTAL'.padEnd(28)} ${k(on).padStart(10)} ${k(inv).padStart(10)}\n`);
   process.stdout.write(c.dim(`  always-on = name + description, paid in every session; on-invoke = body (+ wired agents / referenced files). ${method === 'estimate' ? 'Estimates — run with --exact (ANTHROPIC_API_KEY) for API-counted tokens.' : 'Counted by the Claude token-counting API.'}\n`));
-  if (usage) process.stdout.write(c.dim(`  used = invocations recorded by ${rel(usage.workspace)} over ${usage.days} day(s)${usage.from ? ` (${usage.from}…${usage.to})` : ''}; ⊘ = denied. Local telemetry, never sent anywhere.\n`));
+  if (usage) {
+    process.stdout.write(c.dim(`  used = invocations recorded by ${rel(usage.workspace)} over ${usage.days} day(s)${usage.from ? ` (${usage.from}…${usage.to})` : ''}; ⊘ = denied${usage.probes ? `; ${usage.probes} self-test probe row(s) excluded` : ''}. Local telemetry, never sent anywhere.\n`));
+    // A zero is only evidence of disuse if the path a human uses was being watched.
+    if (!usage.pathsRecorded) process.stdout.write(c.yellow(`  ! this workspace's telemetry predates per-path recording: direct /slash invocations were never logged, so a "0" here means NOT RECORDED, not unused. Update the workspace to a gate that records both paths.\n`));
+  }
   else if (opts.workspace) process.stdout.write(c.yellow(`  no telemetry under ${rel(path.resolve(opts.workspace))}/memory/telemetry\n`));
   return lines.some((l) => l.over.length) ? 1 : 0;
 }

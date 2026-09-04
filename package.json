@@ -1,6 +1,6 @@
 {
   "name": "saut",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "private": true,
   "description": "SAUT (Skill Assurance Under Trust) — lint, cost and test agent skills for any harness",
   "license": "Apache-2.0",

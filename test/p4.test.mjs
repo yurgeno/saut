@@ -84,6 +84,37 @@ test('usage: invoke events are counted per artifact; nothing else is read', asyn
   } finally { await fs.rm(ws, { recursive: true, force: true }); }
 });
 
+test('usage: self-test probe rows are excluded and the pre-path-recording blind spot is declared', async () => {
+  const ws = await fs.mkdtemp(path.join(os.tmpdir(), 'saut-ws-probe-'));
+  const dir = path.join(ws, 'memory', 'telemetry');
+  await fs.mkdir(dir, { recursive: true });
+  // `taut check` writes an allow against the first skill in the manifest and a deny against
+  // a reserved name, in the same second, out of band. Counted as usage, a routinely checked
+  // workspace shows a large invented number on whichever skill sorts first.
+  const rows = [
+    { ts: '2026-09-01T10:00:00.100Z', event: 'invoke', kind: 'skill', name: 'fx-first', decision: 'allow', managed: true },
+    { ts: '2026-09-01T10:00:00.900Z', event: 'invoke', kind: 'skill', name: 'taut-check-foreign-probe', decision: 'deny', cause: 'strict-foreign' },
+    { ts: '2026-09-01T10:05:00.000Z', event: 'invoke', kind: 'skill', name: 'fx-first', decision: 'allow', managed: true, session_id: 'real' },
+    { ts: '2026-09-02T09:00:00.000Z', event: 'invoke', kind: 'skill', name: 'fx-marked', decision: 'allow', managed: true, probe: true },
+  ];
+  await fs.writeFile(path.join(dir, '2026-09-01.jsonl'), rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+  try {
+    const u = await readUsage(ws);
+    assert.equal(usageFor(u, 'fx-first').allow, 1, 'only the real invocation counts');
+    assert.equal(usageFor(u, 'taut-check-foreign-probe'), null, 'the reserved probe name is never an artifact');
+    assert.equal(usageFor(u, 'fx-marked'), null, 'an explicitly marked probe is not use');
+    assert.equal(u.probes, 3, 'excluded rows are reported, not silently dropped');
+    assert.equal(u.pathsRecorded, false, 'no row carries `via` — these files predate per-path recording');
+
+    // A file whose rows say which path they came from is trustworthy about zeros.
+    await fs.writeFile(path.join(dir, '2026-09-03.jsonl'),
+      JSON.stringify({ ts: '2026-09-03T09:00:00.000Z', event: 'invoke', kind: 'skill', name: 'fx-slash', decision: 'allow', managed: true, via: 'slash', session_id: 's' }) + '\n');
+    const u2 = await readUsage(ws);
+    assert.equal(u2.pathsRecorded, true);
+    assert.equal(usageFor(u2, 'fx-slash').allow, 1, 'a /slash invocation is usage like any other');
+  } finally { await fs.rm(ws, { recursive: true, force: true }); }
+});
+
 // ---- role collision (TAUT, pack level) ------------------------------------------------------
 const engine = await findEngine(process.env.SAUT_TAUT_ENGINE ?? null);
 test('two skills claiming the same metadata.taut.role collide (the engine resolves one)', { skip: engine ? false : 'no TAUT engine reachable' }, async () => {
