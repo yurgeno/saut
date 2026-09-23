@@ -127,7 +127,7 @@ on that case, instead of reporting a 0 % trigger rate the description cannot fix
 - Codex runs `--sandbox read-only --ephemeral`;
   opencode gets deny-by-default permissions; Claude runs `--permission-mode dontAsk` with the
   grant above and `--setting-sources project`.
-- Cheap models by default (`haiku`, `gpt-5.4-mini`); `--model` overrides, `--max-cost <usd>`
+- Cheap models by default (`haiku`, `gpt-6-luna` — needs Codex CLI 0.156.1 or newer); `--model` overrides, `--max-cost <usd>`
   stops the bench when Claude-reported spend reaches the ceiling (Codex and opencode do not
   report cost — token totals are reported instead). `--judge-model` sets the L4 judge (default
   `haiku`); its cost counts against the same ceiling.

@@ -81,3 +81,22 @@ test('taut-agent-missing fires only when agents were in scope', async () => {
   const { diagnostics } = await runLint([path.join(PACK, 'skills', 'fx-branches')], opts);
   assert.ok(!codes(diagnostics).includes('taut-agent-missing'));
 });
+
+test('description-over-spec: a skill description over 1024 characters is high; 1024 is clean', async () => {
+  const fs = await import('node:fs/promises');
+  const os = await import('node:os');
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'saut-desc-'));
+  const mk = async (name, len) => {
+    await fs.mkdir(path.join(root, name), { recursive: true });
+    await fs.writeFile(path.join(root, name, 'SKILL.md'),
+      `---\nname: ${name}\ndescription: "${'d'.repeat(len)}"\nallowed-tools: [Read]\ndisable-model-invocation: true\n---\n\nRead the file.\n`);
+  };
+  await mk('over-spec', 1025);
+  await mk('at-spec', 1024);
+  const { diagnostics } = await runLint([root], { _: [] });
+  const over = diagnostics.filter((x) => x.path.endsWith('over-spec/SKILL.md') && x.code === 'description-over-spec');
+  assert.equal(over.length, 1);
+  assert.equal(over[0].severity, 'high');
+  assert.ok(!diagnostics.some((x) => x.path.endsWith('at-spec/SKILL.md') && x.code === 'description-over-spec'));
+  await fs.rm(root, { recursive: true, force: true });
+});

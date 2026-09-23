@@ -3,6 +3,19 @@
 All notable changes to SAUT. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions are [semantic](https://semver.org/) and each release is tagged.
 
+## [0.6.3] — 2026-09-23
+
+### Added
+
+- **`description-over-spec` (high).** A skill `description` longer than the 1 024 characters the
+  Agent Skills specification allows. Loaders accept it today; a stricter one, or a Skills API
+  upload, drops or rejects the skill. Separate from the `description-too-long` budget rule.
+
+### Fixed
+
+- **Bench default model for Codex.** `gpt-5.4-mini` was retired on 2026-08-31; the cheap default
+  is now `gpt-6-luna` (Codex CLI 0.156.1 or newer).
+
 ## [0.6.2] — 2026-09-04
 
 ### Added

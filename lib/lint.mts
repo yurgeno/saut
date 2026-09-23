@@ -9,6 +9,8 @@ import { bodyToolMentions } from './skill.mts';
 import path from 'node:path';
 import { classifyTool } from './tools.mts';
 
+export const SPEC_DESCRIPTION_MAX = 1024;
+
 export interface LintOptions {
   harnesses: HarnessCaps[];
   registry: ToolRegistry;
@@ -65,6 +67,11 @@ export function lintArtifact(a: Artifact, o: LintOptions): Diagnostic[] {
 
   if (!a.name) out.push(d(a, 'missing-name', 'high', 'frontmatter has no `name`'));
   if (!a.description) out.push(d(a, 'missing-description', 'high', 'frontmatter has no `description` — the harness cannot route to this artifact'));
+  // The Agent Skills specification caps a skill `description` at 1024 characters. Loaders
+  // accept more today, but a stricter loader (or a Skills API upload) drops or rejects it.
+  const descChars = [...a.description].length;
+  if (a.kind === 'skill' && descChars > SPEC_DESCRIPTION_MAX)
+    out.push(d(a, 'description-over-spec', 'high', `description is ${descChars} characters — the Agent Skills specification allows ${SPEC_DESCRIPTION_MAX}; shorten it (lead with when to use it) or a strict loader drops the skill`, { line: a.fm.lines.description, precedent: 'agentskills.io/specification' }));
   const cap = o.descriptionChars ?? primary?.listing.descCap ?? 1536;
   if (a.description.length > cap)
     out.push(d(a, 'description-too-long', a.description.length > cap * 1.5 ? 'medium' : 'low', `description is ${a.description.length} chars (budget ${cap}); it is paid in EVERY session — keep the routing sentence, move the method into the body`, { line: a.fm.lines.description, precedent: 'T1' }));

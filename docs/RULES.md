@@ -40,6 +40,7 @@ harness, what the declared allowlist actually is there — `restrict`, `grant`, 
 | rule | severity | fires when | precedent |
 |---|---|---|---|
 | `missing-name` / `missing-description` | high | the routing fields are absent | spec |
+| `description-over-spec` | high | a skill `description` longer than the 1 024 characters the Agent Skills specification allows — loaders accept it today, a strict one (or a Skills API upload) drops or rejects the skill | agentskills.io/specification |
 | `description-too-long` | low / medium | the description exceeds the budget (default: Claude Code's 1 536-char listing cap) — paid in every session | T1 |
 | `frontmatter-syntax` / `no-frontmatter` | high | the frontmatter cannot be parsed (unterminated list, anchors, continuation lines…) | — |
 | `duplicate-key` | info | a top-level key appears more than once — capability-marker branches; allowlists are read as the union, the first description wins | TAUT markers |

@@ -20,7 +20,7 @@ export interface RunSpec {
   rawDir: string;
 }
 
-const DEFAULT_MODEL: Record<string, string | undefined> = { 'claude-code': 'haiku', codex: 'gpt-5.4-mini', opencode: undefined };
+const DEFAULT_MODEL: Record<string, string | undefined> = { 'claude-code': 'haiku', codex: 'gpt-6-luna', opencode: undefined };
 
 export const which = onPath;
 
