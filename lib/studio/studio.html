@@ -188,8 +188,9 @@ function toast(msg, bad) {
   t.style.borderColor = bad ? '#6d2f2f' : '#242b36';
   clearTimeout(t._h); t._h = setTimeout(() => { t.style.display = 'none'; }, 5200);
 }
+// Every /api route requires the token, reads included — so GETs carry the header too.
 async function api(path, body) {
-  const r = await fetch(path, body === undefined ? {} : {
+  const r = await fetch(path, body === undefined ? { headers: { 'x-saut-token': TOKEN } } : {
     method: 'POST', headers: { 'content-type': 'application/json', 'x-saut-token': TOKEN }, body: JSON.stringify(body),
   });
   const j = await r.json().catch(() => ({ error: 'bad response' }));

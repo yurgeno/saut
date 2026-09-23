@@ -75,6 +75,19 @@ test('the page cannot be framed and declares a restrictive policy', async () => 
   assert.equal(r.headers.get('referrer-policy'), 'no-referrer');
 });
 
+// The helpers above send the token themselves, so they cannot notice the page forgetting it.
+// This drives the page's OWN api() — lifted from the served HTML — against the server.
+test('the served page reaches every read route with its own api()', async () => {
+  const html = await (await getNoToken('/')).text();
+  const token = html.match(/const TOKEN = '([0-9a-f]+)'/)[1];
+  const src = html.match(/async function api\(path, body\) \{[\s\S]*?\n\}/)[0];
+  const api = new Function('fetch', 'TOKEN', `${src}\nreturn api;`)((p, init) => fetch(base + p, init), token);
+  const ctx = await api('/api/context');
+  assert.ok(ctx.artifacts.some((a) => a.name === 'fx-clean'), 'the page loads its context');
+  const pass = await api('/api/artifact?path=' + encodeURIComponent(path.join(root, 'skills', 'fx-clean', 'SKILL.md')));
+  assert.equal(pass.frontmatter.name, 'fx-clean', 'the page opens an artifact');
+});
+
 test('containment resolves symlinks: a link out of the root is refused for read and write', async () => {
   const outside = path.join(os.tmpdir(), `saut-outside-${process.pid}.md`);
   await fs.writeFile(outside, '---\nname: outside\ndescription: secret\n---\nOUTSIDE\n');

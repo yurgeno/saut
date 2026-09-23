@@ -3,6 +3,16 @@
 All notable changes to SAUT. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions are [semantic](https://semver.org/) and each release is tagged.
 
+## [0.6.4] — 2026-09-23
+
+### Fixed
+
+- **Studio opened empty.** Since 0.6.0 every `/api` route requires the session token, reads
+  included, but the page sent it only on POST — so its first `GET /api/context` was refused and
+  no artifact or harness loaded. Every request now carries the token. A test drives the served
+  page's own `api()` against the server; the existing helpers sent the token themselves and
+  could not notice.
+
 ## [0.6.3] — 2026-09-23
 
 ### Added
