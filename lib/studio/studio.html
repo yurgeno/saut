@@ -129,6 +129,7 @@
         <div class="row" style="margin-top:9px">
           <button class="btn primary" id="save">Save</button>
           <button class="btn" id="revert">Revert</button>
+          <span class="warn" id="dirtyMark" style="display:none">● unsaved changes</span>
           <span class="muted" id="savePath"></span>
         </div>
       </div>
@@ -159,6 +160,7 @@
               <option value="1">L1 compile (free)</option>
               <option value="2">L2 + trigger</option>
               <option value="3" selected>L3 + obedience</option>
+              <option value="4">L4 + scenario graders</option>
             </select>
             <input type="text" id="benchRuns" value="1" style="width:64px" title="runs per case">
             <input type="text" id="benchCost" value="0.50" style="width:80px" title="max cost, USD">
@@ -182,6 +184,13 @@ const TOKEN = '%%TOKEN%%';
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 let ctx = null, current = null, dirty = false, selectedTools = [], benchSel = [];
+// Every edit marks the form dirty; anything that would replace the form asks first.
+function setDirty(v) { dirty = v; $('dirtyMark').style.display = v ? 'inline' : 'none'; }
+function confirmDiscard() {
+  if (!dirty) return true;
+  const what = (current && current.name) || $('f_name').value.trim() || 'this artifact';
+  return confirm('Unsaved changes to ' + what + ' will be lost. Discard them?');
+}
 
 function toast(msg, bad) {
   const t = $('toast'); t.textContent = msg; t.style.display = 'block';
@@ -214,7 +223,7 @@ function drawArtifacts() {
     const b = document.createElement('button');
     b.className = 'item' + (current && current.path === a.path ? ' active' : '');
     b.innerHTML = '<span class="k">' + a.kind + '</span> ' + esc(a.name);
-    b.onclick = () => openArtifact(a.path);
+    b.onclick = () => { if (confirmDiscard()) openArtifact(a.path).catch((e) => toast(e.message, true)); };
     el.appendChild(b);
   }
   if (!ctx.artifacts.length) el.innerHTML = '<div class="muted">nothing found under this root</div>';
@@ -243,7 +252,7 @@ function drawToolPicker() {
 function drawTools() {
   $('toolPills').innerHTML = selectedTools.map((t, i) =>
     '<span class="pill on">' + esc(t) + '<button data-i="' + i + '">×</button></span>').join('') || '<span class="muted">none — the skill gets the full toolset</span>';
-  for (const b of $('toolPills').querySelectorAll('button')) b.onclick = () => { selectedTools.splice(+b.dataset.i, 1); drawTools(); dirty = true; };
+  for (const b of $('toolPills').querySelectorAll('button')) b.onclick = () => { selectedTools.splice(+b.dataset.i, 1); drawTools(); setDirty(true); };
 }
 function drawBenchHarnesses() {
   const runnable = ctx.harnesses.filter((h) => h.runner);
@@ -279,7 +288,7 @@ async function openArtifact(p) {
   const body = pass.text.replace(/^---\n[\s\S]*?\n---\n?/, '');
   $('body').value = body;
   $('savePath').textContent = pass.path;
-  dirty = false;
+  setDirty(false);
   drawTools(); drawArtifacts(); drawPassport(pass); drawCompiled(pass);
   counts();
 }
@@ -352,13 +361,13 @@ $('save').onclick = async () => {
     toast((r.created ? 'created ' : 'saved ') + r.path);
     await loadContext();
     current = r.passport; drawPassport(r.passport); drawCompiled(r.passport);
-    $('savePath').textContent = r.path; dirty = false;
+    $('savePath').textContent = r.path; setDirty(false);
   } catch (e) { toast(e.message, true); }
 };
-$('revert').onclick = () => { if (current) openArtifact(current.path); };
+$('revert').onclick = () => { if (current && current.path && confirmDiscard()) openArtifact(current.path).catch((e) => toast(e.message, true)); };
 
-$('newSkill').onclick = () => newArtifact('skill');
-$('newAgent').onclick = () => newArtifact('agent');
+$('newSkill').onclick = () => { if (confirmDiscard()) newArtifact('skill'); };
+$('newAgent').onclick = () => { if (confirmDiscard()) newArtifact('agent'); };
 function newArtifact(kind) {
   current = { kind, path: null, name: '', compiled: [] };
   $('f_name').value = ''; $('f_desc').value = ''; $('f_hint').value = '';
@@ -370,6 +379,7 @@ function newArtifact(kind) {
   $('savePath').textContent = '(new — saved into ' + (kind === 'agent' ? 'agents/' : 'skills/<name>/') + ')';
   drawTools(); $('findings').innerHTML = '<div class="muted">save to lint</div>';
   $('cost').innerHTML = ''; $('matrix').innerHTML = ''; $('compiledList').innerHTML = '';
+  setDirty(false); drawArtifacts();
   counts();
 }
 
@@ -377,9 +387,11 @@ $('addTool').onclick = () => {
   const base = $('toolPick').value; const scope = $('toolScope').value.trim();
   const entry = scope ? base + '(' + scope + ')' : base;
   if (!selectedTools.includes(entry)) selectedTools.push(entry);
-  $('toolScope').value = ''; dirty = true; drawTools();
+  $('toolScope').value = ''; setDirty(true); drawTools();
 };
-for (const id of ['f_desc', 'body']) $(id).addEventListener('input', () => { dirty = true; counts(); });
+for (const id of ['f_name', 'f_hint', 'f_desc', 'f_model', 'f_effort', 'f_agents', 'f_mcp', 'f_requires', 'f_repos', 'f_role', 'body'])
+  $(id).addEventListener('input', () => { setDirty(true); counts(); });
+for (const id of ['f_userInv', 'f_noModel']) $(id).addEventListener('change', () => setDirty(true));
 
 // ── tabs ──────────────────────────────────────────────────────────
 for (const t of document.querySelectorAll('.tab')) t.onclick = () => {
@@ -413,17 +425,25 @@ $('runBench').onclick = async () => {
   } catch (e) { $('runBench').disabled = false; toast(e.message, true); }
 };
 
+function scenarioCell(sc) {
+  if (!sc || sc.score === null) return '<span class="muted">' + (sc && !sc.graded ? 'no graders' : '—') + '</span>';
+  const pct = Math.round(sc.score * 100) + '%';
+  return '<span class="' + (sc.score === 1 ? 'ok' : 'bad') + '">' + pct + '</span>' + (sc.failed.length ? ' <span class="muted">(' + esc(sc.failed.join(', ')) + ')</span>' : '');
+}
+
 function drawBenchMatrix(r) {
   const pct = (x) => x === null ? '—' : Math.round(x * 100) + '%';
-  let html = '<table><tr><th>harness</th><th>trigger</th><th>control</th><th>obedience</th></tr>';
+  const l4 = r.levels.includes(4);
+  let html = '<table><tr><th>harness</th><th>trigger</th><th>control</th><th>obedience</th>' + (l4 ? '<th>scenario</th>' : '') + '</tr>';
   for (const rep of r.reports) {
-    if (!rep.available) { html += '<tr><td>' + esc(rep.harness) + '</td><td colspan="3" class="muted">' + esc(rep.reason || 'unavailable') + '</td></tr>'; continue; }
+    if (!rep.available) { html += '<tr><td>' + esc(rep.harness) + '</td><td colspan="' + (l4 ? 4 : 3) + '" class="muted">' + esc(rep.reason || 'unavailable') + '</td></tr>'; continue; }
     const ob = rep.obedience;
     html += '<tr><td>' + esc(rep.harness) + '</td>' +
       '<td class="' + (rep.trigger.fireRate ? 'ok' : 'bad') + '">' + pct(rep.trigger.fireRate) + (rep.trigger.lostTo.length ? ' <span class="warn">lost to ' + esc(rep.trigger.lostTo.join(', ')) + '</span>' : '') + '</td>' +
       '<td class="' + (rep.trigger.controlClean === false ? 'bad' : 'ok') + '">' + (rep.trigger.controlClean === null ? '—' : rep.trigger.controlClean ? 'clean' : 'FIRED') + '</td>' +
-      '<td>' + (ob ? (ob.violations.length ? '<span class="bad">' + ob.violations.length + ' outside</span>' : '<span class="ok">inside</span>') + ' <span class="muted">[' + esc(ob.enforcement) + ']</span>' : '—') + '</td></tr>';
-    if (ob && ob.violations.length) html += '<tr><td></td><td colspan="3" class="warn" style="font-size:11px">' + esc(ob.violations.join(' · ')) + '</td></tr>';
+      '<td>' + (ob ? (ob.violations.length ? '<span class="bad">' + ob.violations.length + ' outside</span>' : '<span class="ok">inside</span>') + ' <span class="muted">[' + esc(ob.enforcement) + ']</span>' : '—') + '</td>' +
+      (l4 ? '<td>' + scenarioCell(rep.scenario) + '</td>' : '') + '</tr>';
+    if (ob && ob.violations.length) html += '<tr><td></td><td colspan="' + (l4 ? 4 : 3) + '" class="warn" style="font-size:11px">' + esc(ob.violations.join(' · ')) + '</td></tr>';
   }
   html += '</table><div class="muted" style="margin-top:6px">L1 ' + (r.compiled.ok ? '<span class="ok">ok</span>' : '<span class="bad">FAIL</span>') + ' ' + esc(r.compiled.detail) + '</div>';
   $('benchMatrix').innerHTML = html;

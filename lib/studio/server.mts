@@ -21,6 +21,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 import { runBench } from '../bench/bench.mts';
+import { newResultsDir } from '../bench/results.mts';
 import type { BenchResult } from '../bench/types.mts';
 import { costOf, overBudget } from '../cost.mts';
 import { emitFrontmatter } from '../frontmatter.mts';
@@ -197,9 +198,9 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
     }
     const push = (e: { kind: string; text: string }) => { job.events.push(e); for (const l of job.listeners) l(e); };
     const siblings = taut ? (await load([taut.packRoot], opts)).artifacts : artifacts;
-    const outDir = path.join(a.kind === 'skill' ? a.dir : path.dirname(a.path), 'evals', 'results', new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19));
+    const outDir = await newResultsDir(a);
     runBench({
-      artifact: a, siblings, harnesses: selected, taut, level: (Number(payload.level) || 3) as 1 | 2 | 3,
+      artifact: a, siblings, harnesses: selected, taut, level: Math.min(4, Math.max(1, Math.trunc(Number(payload.level)) || 3)) as 1 | 2 | 3 | 4,
       runs: Math.max(1, Math.min(5, Number(payload.runs) || 1)), model: payload.model || undefined,
       maxCostUsd: payload.maxCost === undefined || payload.maxCost === null || payload.maxCost === '' ? null : Number(payload.maxCost),
       landscape: null, caseFilter: payload.case || undefined, outDir, keepScratch: false,

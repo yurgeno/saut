@@ -136,13 +136,16 @@ on that case, instead of reporting a 0 % trigger rate the description cannot fix
 
 ## Output
 
-`<artifact>/evals/results/<timestamp>/matrix.json` — the full result: every trace with its
+`~/.saut/results/<name>--<hash>/<timestamp>/matrix.json` — the full result: every trace with its
 tool calls, usage, cost and the path to the raw event stream under `traces/`. `--out` moves
 it, `--json` prints it. Exit code 1 when the compile failed, a fire rate is 0, a control
 fired, a call landed outside the allowlist, or a scenario scored below 100 %.
 
-Results land next to the artifact by convention (the `plugin eval` layout). In a pack under
-version control, add `evals/results/` to `.gitignore` — the cases are source, the runs are not.
+Results never land inside the project: traces carry full model transcripts, and a compiled
+workspace's skill directories are sealed by an integrity lock. Each artifact gets one directory,
+keyed by its name and a hash of its real path, so a run from the CLI and one from the Studio
+share a history. `$SAUT_HOME` moves the root (default `~/.saut`); `--out` writes one run
+anywhere. Runs from 0.6.x and earlier sit in `<artifact>/evals/results/` and are left alone.
 
 ## Adding a harness
 

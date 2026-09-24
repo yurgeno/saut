@@ -3,6 +3,27 @@
 All notable changes to SAUT. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions are [semantic](https://semver.org/) and each release is tagged.
 
+## [Unreleased]
+
+### Changed
+
+- **Bench results live outside the project.** `saut test` and the Studio write runs to
+  `~/.saut/results/<name>--<hash>/<timestamp>/` (`$SAUT_HOME` moves the root; `--out` still
+  writes one run anywhere). Traces carry full model transcripts, and a compiled workspace's
+  skill directories are sealed by an integrity lock — neither should receive them. One
+  directory per artifact, keyed by its real path, so CLI and Studio runs share a history.
+  Earlier runs under `<artifact>/evals/results/` are left where they are.
+
+### Fixed
+
+- **Studio lost unsaved edits.** Opening another artifact, starting a new one or reverting
+  replaced the form without asking, and only the description and body marked the form as
+  edited. Every field now does; an **● unsaved changes** mark sits next to Save, and anything
+  that would discard edits asks first.
+- **Studio offered no L4.** The bench level list stopped at L3 although the server ran L4; the
+  scenario column now shows in the result matrix.
+- The docs said the passport updates as you type; it updates on open and on save.
+
 ## [0.6.4] — 2026-09-23
 
 ### Fixed

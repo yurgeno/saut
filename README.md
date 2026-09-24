@@ -170,7 +170,7 @@ saut studio .
 ```
 
 One local page over the same functions: the form writes frontmatter through the emitter (so it
-compiles), the passport shows cost, the enforcement matrix and every finding as you type, the
+compiles), the passport shows cost, the enforcement matrix and every finding on open and on save, the
 Compiled tab shows the exact per-harness bytes for a TAUT pack, and the Bench tab runs L1–L4
 with the events streaming live. **Validate pack** runs the pack's own `tools/validate-pack.sh`.
 

@@ -7,7 +7,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { startStudio } from '../lib/studio/server.mts';
-import { PACK } from './helpers.mjs';
+import { PACK, REPO } from './helpers.mjs';
 
 let studio; let base; let root;
 
@@ -187,6 +187,61 @@ test('POST /api/test + SSE: L1 streams events and ends with the matrix', async (
   assert.equal(end.result.artifact.name, 'fx-clean');
   const missing = await get(`/api/test/nosuchid/events?token=${studio.token}`);
   assert.equal(missing.status, 404);
+});
+
+// Read an SSE stream until the run ends; returns every event and the final payload.
+async function drain(id) {
+  const res = await get(`/api/test/${id}/events?token=${studio.token}`);
+  let buf = '';
+  for await (const chunk of res.body) { buf += Buffer.from(chunk).toString(); if (buf.includes('event: end')) break; }
+  const events = [...buf.matchAll(/^data: (\{.*\})$/gm)].map((m) => JSON.parse(m[1]));
+  return { events, end: events.at(-1) };
+}
+
+test('a Studio bench run lands in SAUT_HOME, never inside the project', async () => {
+  const skillDir = path.join(root, 'skills', 'fx-clean');
+  const { id } = await (await post('/api/test', { path: path.join(skillDir, 'SKILL.md'), level: 1, harnesses: ['claude-code'] })).json();
+  const { events, end } = await drain(id);
+  assert.equal(end.error, null);
+  const done = events.find((e) => e.kind === 'done');
+  assert.ok(done, 'the run reports where it landed');
+  assert.ok(done.text.startsWith(path.join(process.env.SAUT_HOME, 'results', 'fx-clean--')), done.text);
+  assert.ok(await fs.stat(path.join(done.text, 'matrix.json')).then(() => true, () => false), 'matrix.json written');
+  assert.equal(await fs.stat(path.join(skillDir, 'evals', 'results')).then(() => true, () => false), false, 'nothing under the skill');
+});
+
+test('the Studio runs L4: the level is not clamped to 3', async () => {
+  // fake harness binaries on PATH (the same fixture the bench suite uses) — offline and free
+  const bin = await fs.mkdtemp(path.join(os.tmpdir(), 'saut-bin-'));
+  for (const name of ['claude', 'codex', 'opencode'])
+    await fs.writeFile(path.join(bin, name), `#!/bin/sh\nSAUT_FAKE=${name === 'claude' ? 'claude-code' : name} SAUT_FAKE_SCRIPT=fire SAUT_FAKE_SKILL=fx-clean exec node "${path.join(REPO, 'test', 'fixtures', 'fake-harness.mjs')}" "$@"\n`, { mode: 0o755 });
+  const oldPath = process.env.PATH;
+  process.env.PATH = `${bin}${path.delimiter}${oldPath}`;
+  try {
+    const { id } = await (await post('/api/test', { path: path.join(root, 'skills', 'fx-clean', 'SKILL.md'), level: 4, harnesses: ['claude-code'] })).json();
+    const { end } = await drain(id);
+    assert.equal(end.error, null);
+    assert.deepEqual(end.result.levels, [1, 2, 3, 4]);
+    const rep = end.result.reports.find((r) => r.harness === 'claude-code');
+    assert.ok(rep && 'scenario' in rep, 'the report carries the L4 scenario block');
+  } finally { process.env.PATH = oldPath; await fs.rm(bin, { recursive: true, force: true }); }
+});
+
+// The page is not run in a browser here, so guard the wiring statically: every form field the
+// page renders must mark the form dirty, and everything that replaces the form must ask first.
+test('the page tracks unsaved edits on every field and asks before discarding them', async () => {
+  const html = await (await getNoToken('/')).text();
+  const fields = [...html.matchAll(/<(?:input|textarea)[^>]*\bid="(f_[a-zA-Z]+|body)"/g)].map((m) => m[1]);
+  assert.ok(fields.length >= 12, `form fields found: ${fields}`);
+  const wired = new Set([...html.matchAll(/for \(const id of \[([^\]]+)\]\)/g)].flatMap((m) => [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1])));
+  for (const f of fields) assert.ok(wired.has(f), `${f} does not mark the form dirty`);
+  for (const guard of [
+    /b\.onclick = \(\) => \{ if \(confirmDiscard\(\)\) openArtifact/,
+    /\$\('newSkill'\)\.onclick = \(\) => \{ if \(confirmDiscard\(\)\)/,
+    /\$\('newAgent'\)\.onclick = \(\) => \{ if \(confirmDiscard\(\)\)/,
+    /\$\('revert'\)\.onclick = \(\) => \{ if \(current && current\.path && confirmDiscard\(\)\)/,
+  ]) assert.match(html, guard);
+  assert.match(html, /<option value="4">L4/, 'L4 is offered');
 });
 
 test('the token is compared in constant time and finished runs are evicted', async () => {

@@ -21,15 +21,19 @@ model and effort, the tool picker (built from the harness registry plus the MCP 
 scope box for `Bash(git status *)`), and — in a TAUT pack — the `metadata.taut` wiring block.
 The form emits frontmatter through the emitter, so what it writes is what the parser accepts.
 A pasted multi-line description is folded to one line rather than silently breaking the compile.
+Any edit shows **● unsaved changes** next to Save; opening another artifact, starting a new one
+or reverting asks before it discards them.
 
 **Right — three tabs.**
 
 - *Passport*: cost (always-on / on-invoke, with what the artifact drags in transitively), the
-  per-harness enforcement matrix, and every lint finding with its rule id and line.
+  per-harness enforcement matrix, and every lint finding with its rule id and line. It is
+  computed when the artifact opens and again on save.
 - *Compiled* (TAUT packs): the exact bytes the installer would write on each harness, with that
   adapter's degradations — the compiler in the authoring loop.
-- *Bench*: pick the level, runs, cost ceiling and harnesses, press Run, and the events stream in
-  live over SSE; the matrix lands underneath. **Validate pack** runs the pack's own
+- *Bench*: pick the level (L1–L4), runs, cost ceiling and harnesses, press Run, and the events
+  stream in live over SSE; the matrix lands underneath, with a scenario column at L4. Runs are
+  stored outside the project, in `~/.saut/results/` (see [BENCH.md](BENCH.md#output)). **Validate pack** runs the pack's own
   `tools/validate-pack.sh` (compile + verify + the SAUT step) and shows its output verbatim.
 
 ## Security

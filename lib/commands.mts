@@ -12,6 +12,7 @@ import { scan } from './scan.mts';
 import { readUsage, usageFor, type UsageData } from './usage.mts';
 import { catalogServers, detectTaut, lintWiring, previews, refine, type TautContext, type TautPreview } from './adapters/taut.mts';
 import { runBench } from './bench/bench.mts';
+import { newResultsDir } from './bench/results.mts';
 import { startStudio } from './studio/server.mts';
 import type { BenchResult } from './bench/types.mts';
 import type { AgentArtifact, Artifact, Budgets, CostLine, Diagnostic, HarnessCaps, ToolRegistry } from './types.mts';
@@ -48,7 +49,7 @@ export interface Opts {
   maxCost?: number;        // USD ceiling over Claude-reported costs
   landscape?: string;      // TAUT: a real landscape dir, COPIED into scratch (default: stub repos)
   case?: string;           // case name glob
-  out?: string;            // results dir (default <artifact>/evals/results/<timestamp>)
+  out?: string;            // results dir (default $SAUT_HOME/results/<name>--<hash>/<timestamp>)
   keep?: boolean;          // keep the scratch workspace
   timeout?: number;        // seconds per run (default 300)
   port?: number;           // studio
@@ -291,7 +292,7 @@ export async function cmdTools(opts: Opts): Promise<number> {
 // ---- test bench (L1 compile · L2 trigger · L3 obedience) ---------------------------------
 export async function cmdTest(opts: Opts): Promise<number> {
   const target = opts._[0];
-  if (!target) { process.stderr.write('saut test <skill dir | agent .md> [--harness ids] [--level 1|2|3] [--runs n] [--model m] [--max-cost usd] [--landscape dir] [--case glob] [--out dir] [--keep] [--json]\n'); return 2; }
+  if (!target) { process.stderr.write('saut test <skill dir | agent .md> [--harness ids] [--level 1|2|3|4] [--runs n] [--model m] [--max-cost usd] [--landscape dir] [--case glob] [--out dir] [--keep] [--json]\n'); return 2; }
   const { artifacts, harnesses, taut } = await load([target], opts);
   const targets = artifacts.filter((a) => a.kind === 'skill' || (path.resolve(target).endsWith('.md')));
   if (!targets.length) { process.stderr.write(`no skill or agent at ${target}\n`); return 2; }
@@ -301,8 +302,7 @@ export async function cmdTest(opts: Opts): Promise<number> {
   const a = targets[0];
   const siblings = taut ? [...(await load([taut.packRoot], { ...opts, _: [] })).artifacts] : artifacts;
   const level = Math.min(4, Math.max(1, opts.level ?? 3)) as 1 | 2 | 3 | 4;
-  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-  const outDir = opts.out ?? path.join(a.kind === 'skill' ? a.dir : path.dirname(a.path), 'evals', 'results', ts);
+  const outDir = opts.out ? path.resolve(opts.out) : await newResultsDir(a);
   const log = (e: { kind: string; text: string }) => { if (!opts.json) process.stderr.write(`${e.kind === 'fail' ? c.red(e.kind.padEnd(6)) : e.kind === 'ok' ? c.green(e.kind.padEnd(6)) : c.dim(e.kind.padEnd(6))} ${e.text}\n`); };
   if (!opts.json) process.stderr.write(`${c.bold(`bench ${a.kind} ${a.name}`)} ${c.dim(`level ${level} · runs ${opts.runs ?? 1} · ${taut ? `TAUT pack ${rel(taut.packRoot)} via ${rel(taut.engine)}` : 'generic'} · harnesses ${harnesses.filter((h) => h.runner).map((h) => h.id).join(',')}`)}\n`);
   const result = await runBench({

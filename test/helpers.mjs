@@ -3,10 +3,17 @@
 // rule; the suites never touch real content.
 import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
+import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
+
+// Bench results default to ~/.saut — a suite must never write into the real home. Every suite
+// that imports the helpers gets its own throwaway SAUT_HOME, removed when the process exits.
+process.env.SAUT_HOME = mkdtempSync(path.join(os.tmpdir(), 'saut-home-'));
+const TEST_HOME = process.env.SAUT_HOME;
+process.on('exit', () => rmSync(TEST_HOME, { recursive: true, force: true }));
 
 export const run = promisify(execFile);
 export const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));

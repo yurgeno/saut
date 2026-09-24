@@ -166,3 +166,23 @@ test('an unavailable provider is a reported row, never a crash; budget stops the
   assert.equal(b.budget.exhausted, true);
   assert.ok(b.reports.find((x) => x.harness === 'claude-code').traces.length < 3);
 });
+
+test('results live under SAUT_HOME, one directory per artifact, keyed by its real path', async () => {
+  const { artifactResultsRoot, newResultsDir, resultsHome } = await import('../lib/bench/results.mts');
+  assert.equal(resultsHome(), path.join(process.env.SAUT_HOME, 'results'), 'the suite runs against its own throwaway home');
+  const a = await artifactResultsRoot(skill);
+  assert.match(path.basename(a), /^fx-clean--[0-9a-f]{8}$/);
+  assert.equal(path.dirname(a), resultsHome(), 'never inside the project');
+  assert.equal(await artifactResultsRoot(skill), a, 'the same artifact always gets the same directory');
+  const copy = await copySkill('fx-clean');
+  try {
+    const [copied] = await discover([copy.dir]);
+    const b = await artifactResultsRoot(copied);
+    assert.notEqual(b, a, 'a same-named skill at another path keeps a separate history');
+    assert.match(path.basename(b), /^fx-clean--/);
+  } finally { await copy.cleanup(); }
+  const run = await newResultsDir(skill);
+  assert.equal(path.dirname(run), a);
+  assert.match(path.basename(run), /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}$/);
+  assert.equal(await artifactResultsRoot({ ...skill, name: '../../etc Evil' }).then((p) => path.dirname(p)), resultsHome(), 'a hostile name cannot escape the results home');
+});
