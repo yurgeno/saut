@@ -154,12 +154,21 @@ Exit codes: 0 clean/within budget/bench passed · 1 findings/over budget/bench f
 const opts = parseArgs(process.argv.slice(2));
 const cmd = opts._.shift();
 const table = { lint: cmdLint, cost: cmdCost, passport: cmdPassport, preview: cmdPreview, test: cmdTest, studio: cmdStudio, harnesses: cmdHarnesses, tools: cmdTools };
-if (opts.version || cmd === 'version') { process.stdout.write(`${VERSION}\n`); process.exit(0); }
-if (!cmd || opts.help || cmd === 'help') { process.stdout.write(HELP); process.exit(0); }
-if (!table[cmd]) { process.stderr.write(`saut: unknown command "${cmd}"\n\n${HELP}`); process.exit(2); }
+// Writes to a pipe are asynchronous: process.exit() right after a large write cuts the output
+// at the pipe buffer (64 KB) — `saut lint --json | jq` got half a document. An empty write's
+// callback fires once everything queued before it has been handed to the OS.
+const drained = (stream) => new Promise((resolve) => stream.write('', () => resolve()));
+async function exit(code) {
+  await Promise.all([drained(process.stdout), drained(process.stderr)]);
+  process.exit(code);
+}
+
+if (opts.version || cmd === 'version') { process.stdout.write(`${VERSION}\n`); await exit(0); }
+if (!cmd || opts.help || cmd === 'help') { process.stdout.write(HELP); await exit(0); }
+if (!table[cmd]) { process.stderr.write(`saut: unknown command "${cmd}"\n\n${HELP}`); await exit(2); }
 try {
-  process.exit(await table[cmd](opts));
+  await exit(await table[cmd](opts));
 } catch (e) {
   process.stderr.write(`saut: ${e instanceof SautError ? e.message : (e && e.stack) || e}\n`);
-  process.exit(2);
+  await exit(2);
 }

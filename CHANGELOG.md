@@ -31,6 +31,10 @@ versions are [semantic](https://semver.org/) and each release is tagged.
 
 ### Fixed
 
+- **Piped output was cut at 64 KB.** The CLI exited right after writing, before a pipe had
+  taken the rest, so `saut lint --json | jq` or `--sarif` into an upload step got a truncated
+  document on any tree with more than a screenful of findings. Exit now waits for stdout and
+  stderr to drain.
 - **Studio lost unsaved edits.** Opening another artifact, starting a new one or reverting
   replaced the form without asking, and only the description and body marked the form as
   edited. Every field now does; an **● unsaved changes** mark sits next to Save, and anything

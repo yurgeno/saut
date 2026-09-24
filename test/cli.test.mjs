@@ -1,5 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { saut, PACK, CATALOG } from './helpers.mjs';
 
@@ -85,4 +87,21 @@ test('passport: one JSON with findings, cost and matrix per artifact', async () 
   assert.deepEqual(p.findings, []);
   assert.ok(p.cost.alwaysOnTokens > 0);
   assert.ok(p.matrix.some((m) => m.harness === 'codex' && m.allowlist === 'prose'));
+});
+
+test('output larger than a pipe buffer arrives whole (exit waits for stdout to drain)', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'saut-big-'));
+  try {
+    // enough findings to push --json well past the 64 KB a pipe holds
+    for (let i = 0; i < 120; i++) {
+      const dir = path.join(root, 'skills', `fx-big-${i}`);
+      await fs.mkdir(dir, { recursive: true });
+      await fs.writeFile(path.join(dir, 'SKILL.md'), `---\nname: fx-big-${i}\ndescription: A skill with no allowlist that reads the tracker. Invoke: fx-big-${i}.\n---\n# fx-big-${i}\nRead-only. Fetch the jira ticket and summarise it.\n`);
+    }
+    const r = await saut(['lint', root, '--json']);
+    assert.ok(r.stdout.length > 65536, `output is ${r.stdout.length} bytes — the test needs more than a pipe buffer`);
+    const j = JSON.parse(r.stdout);
+    assert.equal(j.artifacts.length, 120);
+    assert.equal(r.code, 1, 'the exit code survives the wait');
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
