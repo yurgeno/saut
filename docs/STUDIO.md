@@ -71,6 +71,20 @@ unsaved**); nothing is written.
   finding only or the whole rule for this artifact, the `saut.json` diff, then the write. A
   suppressed finding stays listed, with its reason, under *Suppressed*, and can be lifted the
   same way (see [RULES.md](RULES.md#suppressing-a-finding)).
+- *Agent review* — one call to Claude (`claude -p`, the model you pick; `sonnet` by default)
+  with the file, its active findings, the vendor-guidance entries SAUT tracks (each with its date
+  and sources) and the harness semantics. Before the call a confirmation says how many input
+  tokens that is; the cost Claude Code reports is shown after. The reviewer may only propose
+  changes that cite a finding or a guidance entry, as class A (outdated), B (prompt wording — a
+  hypothesis) or D (hardening), and is told to keep hard gates, approvals and exact procedures
+  verbatim. Each proposal is a search/replace the server checks (its text must occur exactly
+  once), applies in memory and re-lints: the card says which findings it resolves and which it
+  introduces, with the diff. **Apply to editor** puts it into the Source view as an unsaved
+  edit — then Save (A, D) or measure it in the Bench (B). Nothing is written by the review, and
+  it runs in an empty directory with no tools; the review is kept for the record under
+  `~/.saut/results/<artifact>/reviews/`. It sends the file to Claude through your Claude Code
+  login — the same as asking Claude Code about it; mind that for confidential material. Without
+  the `claude` CLI the section says so.
 - *Harnesses* — what the allowlist is on each target harness, and what that means.
 - *Cost* — always-on and on-invoke tokens, with the agents the artifact drags in.
 - *Compiled* (TAUT packs) — the exact bytes the installer would write on each harness, with

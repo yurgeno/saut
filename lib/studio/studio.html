@@ -109,6 +109,14 @@
       </div>
 
       <aside class="inspector">
+        <details class="section" id="secReview"><summary>Agent review <span class="muted">— proposals against the findings and current guidance</span></summary>
+          <div class="row">
+            <input type="text" id="reviewModel" list="reviewModels" class="grow" placeholder="sonnet" title="the Claude model that reviews">
+            <datalist id="reviewModels"></datalist>
+            <button class="btn small primary" id="runReview">Review…</button>
+          </div>
+          <div id="reviewOut"></div>
+        </details>
         <details class="section" open id="secProblems"><summary>Problems <span id="problemCount" class="muted"></span></summary><div id="findings"></div></details>
         <details class="section" open><summary>Harnesses</summary><div id="matrix"></div></details>
         <details class="section" open><summary>Cost</summary><div id="cost"></div></details>

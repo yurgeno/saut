@@ -32,7 +32,7 @@ import { explain } from '../rules.mts';
 import { deploymentOf, guidanceStatus, lintGuidance, lintModelTiers, localCatalogs, sandboxedAgents } from '../guidance.mts';
 import { applyFix, lineDiff } from '../fix.mts';
 import type { Artifact, Diagnostic } from '../types.mts';
-import { exists, readText } from '../util.mts';
+import { exists, onPath, readText } from '../util.mts';
 import { previews } from '../adapters/taut.mts';
 import { load, type Opts } from '../commands.mts';
 
@@ -120,7 +120,7 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
       note,
       mode: taut ? 'taut' : locked.size ? 'compiled' : 'generic',
       // what this backend can do — the page shows or hides by these, never by guessing where it runs
-      capabilities: { write: true, fix: true, check: true, compose: true, bench: harnesses.some((h) => h.runner), validate: !!taut, history: true, suppress: true, scan: true, llmReview: false },
+      capabilities: { write: true, fix: true, check: true, compose: true, bench: harnesses.some((h) => h.runner), validate: !!taut, history: true, suppress: true, scan: true, llmReview: await onPath('claude') },
       taut: taut ? { engineCommit: taut.engineCommit, deployment: taut.project?.name ?? null, projects: taut.projects.map((p) => p.name) } : null,
       harnesses: harnesses.map((h) => ({
         id: h.id, title: h.title, runner: !!h.runner, skillsDirs: h.skillsDirs, agentsDir: h.agentsDir, docs: h.docs,
@@ -569,6 +569,50 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
     return { file: relOf(file), applied: true };
   }
 
+  // An agent's review against the findings and the current guidance: proposals only. Each is
+  // checked (its text occurs exactly once), applied in memory, re-linted — what it resolves and
+  // what it introduces — and the review is kept outside the project for the record.
+  async function review(payload: any) {
+    const abs = resolveIn(payload.path);
+    if (!(await contained(abs))) throw new Error('path outside the studio root');
+    const base: string = typeof payload.text === 'string' ? payload.text : await readText(abs);
+    const pass = await passport(abs, base);
+    const { buildReviewPrompt, runReviewer, parseReview, applyChange, DEFAULT_REVIEW_MODEL } = await import('../review.mts');
+    const { RULES } = await import('../rules.mts');
+    const model = typeof payload.model === 'string' && /^[A-Za-z0-9._:\[\]-]{1,60}$/.test(payload.model.trim()) ? payload.model.trim() : DEFAULT_REVIEW_MODEL;
+    const active = pass.findings.filter((f) => !f.suppressed);
+    const prompt = buildReviewPrompt({
+      name: pass.name, kind: pass.kind as 'skill' | 'agent', file: pass.path, text: base, findings: active,
+      guidanceFix: Object.fromEntries(Object.entries(RULES).filter(([, r]) => r.category === 'guidance').map(([id, r]) => [id, r.fix])),
+      harnesses: pass.matrix.map((m) => ({ id: m.harness, allowlist: m.allowlist })),
+    });
+    const { estimateTokens } = await import('../cost.mts');
+    if (payload.estimate) return { model, inputTokens: estimateTokens(prompt), findings: active.length };
+    const { reply, costUsd } = await runReviewer(prompt, model);
+    const parsed = parseReview(reply);
+    const key = (f: Diagnostic) => `${f.code}|${f.message}`;
+    const before = new Set(active.map(key));
+    const changes = [];
+    for (const c of parsed.changes) {
+      const r = applyChange(base, c);
+      if (!r.ok) { changes.push({ ...c, ok: false, reason: r.reason }); continue; }
+      const after = (await passport(abs, r.text)).findings.filter((f) => !f.suppressed);
+      const afterKeys = new Set(after.map(key));
+      changes.push({ ...c, ok: true, diff: lineDiff(base, r.text),
+        resolves: [...new Set(active.filter((f) => !afterKeys.has(key(f))).map((f) => f.code))],
+        introduces: [...new Set(after.filter((f) => !before.has(key(f))).map((f) => f.code))] });
+    }
+    const result = { model, costUsd, summary: parsed.summary, changes, keep: parsed.keep, at: new Date().toISOString(), base: hashOf(base) };
+    const { artifacts } = await load([abs], opts);
+    if (artifacts[0]) {
+      const { artifactResultsRoot, runStamp } = await import('../bench/results.mts');
+      const dir = path.join(await artifactResultsRoot(artifacts[0]), 'reviews');
+      await fs.mkdir(dir, { recursive: true });
+      await fs.writeFile(path.join(dir, `${runStamp()}.json`), JSON.stringify({ ...result, file: pass.path }, null, 2) + '\n');
+    }
+    return result;
+  }
+
   // The cases a bench runs: authored under evals/, else the three generated ones.
   async function cases(file: string) {
     const abs = resolveIn(file);
@@ -762,6 +806,12 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
           if (pathname === '/api/test') return send(200, { id: await startBench(payload) });
           if (pathname === '/api/case') return send(200, await saveCase(payload));
           if (pathname === '/api/suppress') return send(200, await suppress(payload));
+          if (pathname === '/api/review') {
+            if (payload.estimate) return send(200, await review(payload));
+            if (busy) return send(409, { error: 'another action is still running' });
+            busy = true;
+            try { return send(200, await review(payload)); } finally { busy = false; }
+          }
           if (pathname === '/api/scan') {
             if (busy) return send(409, { error: 'another action is still running' });
             busy = true;

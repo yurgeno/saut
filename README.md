@@ -177,8 +177,10 @@ One local page over the same functions. The **Overview** ranks every skill and a
 wrong with it; the **Skill** view edits one — a form and the raw file, a Markdown editor, the
 findings re-linted as you type, each with how to fix it and a previewable fix — and saves
 through a diff, changing only what you changed (comments, unknown keys and capability-marker
-branches survive). **Bench** runs L1–L4 with the events streaming live; **Harnesses** is the
-registry as reference. A compiled TAUT workspace opens read-only, naming the pack source.
+branches survive); an **agent review** proposes changes against the findings and the current
+guidance, each checked and re-linted before you apply it to the editor. **Bench** runs L1–L4 with
+the events streaming live and measures an edit before and after; **Harnesses** is the registry as
+reference. A compiled TAUT workspace opens read-only, naming the pack source.
 
 Loopback only, per-session token in a custom header, no inline scripts, Origin and Host checks,
 writes contained under the root — the same contour as the TAUT panel. Details:

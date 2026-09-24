@@ -7,6 +7,15 @@ versions are [semantic](https://semver.org/) and each release is tagged.
 
 ### Added
 
+- **Agent review in the Studio.** One `claude -p` call (model of your choice, `sonnet` by
+  default; input tokens shown before, the reported cost after) reviews the artifact against
+  its findings and the dated, sourced vendor guidance. It may only propose changes that cite a
+  finding or a guidance entry, classed A/B/D; each is a search/replace SAUT checks (it must
+  match exactly once), applies in memory and re-lints to show what it resolves and introduces.
+  Proposals go to the editor, never to the file; B ones are meant for the before/after bench.
+  The reviewer runs in an empty directory with no tools; each review is kept under
+  `~/.saut/results/<artifact>/reviews/`.
+
 - **Suppressing a finding, with a reason.** `saut.json` `suppress: [{rule, artifact, match?,
   reason}]`. A suppressed finding stays in every output, marked with its reason (SARIF
   `suppressions`), and stops counting toward the totals and the exit code; an entry without a
