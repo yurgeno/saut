@@ -60,7 +60,9 @@ function parseJsonFindings(stdout: string, target: string, id: string): Diagnost
     code: `scan-${String(f.id ?? f.rule ?? f.check ?? f.category ?? 'finding').replace(/\s+/g, '-').toLowerCase()}`,
     severity: sev(String(f.severity ?? f.level ?? f.risk ?? 'medium')),
     message: `${String(f.message ?? f.title ?? f.description ?? f.detail ?? 'finding').slice(0, 400)} [${id}]`,
-    path: f.file ?? f.path ?? f.location ?? target,
+    // scanners report paths relative to what they scanned — anchor them there, as the SARIF
+    // reader does, or the finding belongs to no artifact
+    path: typeof (f.file ?? f.path ?? f.location) === 'string' ? path.resolve(target, String(f.file ?? f.path ?? f.location)) : target,
     line: typeof f.line === 'number' ? f.line : undefined,
     precedent: id,
   }));

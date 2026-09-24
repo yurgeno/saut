@@ -78,6 +78,7 @@ saut lint . --scan                       # + an installed content scanner (rente
 saut lint . --json | --sarif             # CI / IDE
 saut lint . --strict                     # exit 1 on medium findings too
 saut lint . --fix                        # the mechanical fixes as a diff (--write applies the safe ones)
+                                         # a finding that does not apply: suppress it with a reason in saut.json
 
 saut cost .                              # estimates (no key, no network)
 saut cost . --exact                      # counted by the Claude token-counting API

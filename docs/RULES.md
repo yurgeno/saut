@@ -43,6 +43,8 @@ harness, what the declared allowlist actually is there — `restrict`, `grant`, 
 | `description-over-spec` | high | a skill `description` longer than the 1 024 characters the Agent Skills specification allows — loaders accept it today, a strict one (or a Skills API upload) drops or rejects the skill | agentskills.io/specification |
 | `description-too-long` | low / medium | the description exceeds the budget (default: Claude Code's 1 536-char listing cap) — paid in every session | T1 |
 | `frontmatter-syntax` / `no-frontmatter` | high | the frontmatter cannot be parsed (unterminated list, anchors, continuation lines…) | — |
+| `suppression-invalid` | medium | a `suppress` entry in saut.json without a rule, an artifact or a reason of at least 8 characters — ignored until fixed | — |
+| `suppression-unused` | low | a suppression that matches no finding — fixed, or drifted; remove it | — |
 | `duplicate-key` | info | a top-level key appears more than once — capability-marker branches; allowlists are read as the union, the first description wins | TAUT markers |
 
 ## Current guidance (harness and model)
@@ -133,6 +135,36 @@ the read-only claims, `supervised-but-auto`, `agent-writes-via-bash`, builtin
 A `review` fix deserves the diff: `dead-privilege`, for one, reads the body for mentions of the
 tool, and a skill that calls "every allowed MCP server" without naming the tools is flagged
 although it uses them. In the Studio each fix is previewed and applied one at a time.
+
+## Suppressing a finding
+
+A finding that does not apply to a particular artifact is suppressed **with a reason**, in
+`saut.json` next to the pack or skills folder (the nearest one up the tree — the same file that
+carries cost budgets), never in the artifact itself:
+
+```json
+{
+  "suppress": [
+    { "rule": "dead-privilege", "artifact": "upe-check", "match": "mcp__playwright__browser_navigate",
+      "reason": "upe-check calls the cheapest read-only tool of every allowed MCP server without naming it" }
+  ]
+}
+```
+
+`rule` and `artifact` (its name) are required; `match` pins the entry to findings whose message
+contains that text (the Studio writes the finding's quoted subject — a tool name, a matched line —
+so the entry survives the file moving around); without it the entry covers every finding of
+that rule in that artifact. `line` pins a line, but lines move. The `reason` — at least 8
+characters — is required: an entry without one is ignored and reported as
+`suppression-invalid`.
+
+A suppressed finding is not dropped. It stays in every output marked `suppressed` with its
+reason — the text report lists it, `--json` carries `suppressed: {reason, file}`, SARIF sets the
+result's `suppressions` — and it no longer counts toward the totals or the exit code, and
+`--fix` leaves it alone. An entry that matches no finding is reported as `suppression-unused`:
+the finding was fixed, or the entry drifted, and a stale exemption would quietly cover the next
+real one. In the Studio every finding has **Suppress…** (a reason, a scope, the saut.json diff)
+and every suppressed one **Lift the suppression**.
 
 ## Output
 

@@ -133,6 +133,13 @@ table.plain th, table.plain td { text-align: left; padding: 4px 6px; border-bott
 table.plain th { color: var(--muted); font-weight: 500; }
 .legend { font-size: 11px; color: var(--muted); margin-top: 4px; }
 
+/* security card */
+#securityCard h2 { display: flex; gap: 10px; align-items: center; }
+.secrule { display: flex; gap: 8px; align-items: baseline; padding: 4px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+.secrule button.linklike { background: none; border: none; color: var(--accent); cursor: pointer; padding: 0; font: inherit; }
+.secrule .arts { color: var(--muted); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.find.suppressed { opacity: .7; border-left-style: dashed; }
+
 /* bench view */
 .bench-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 560px); gap: 14px; align-items: start; }
 @media (max-width: 1100px) { .bench-grid { grid-template-columns: 1fr; } }

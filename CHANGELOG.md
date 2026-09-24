@@ -7,6 +7,15 @@ versions are [semantic](https://semver.org/) and each release is tagged.
 
 ### Added
 
+- **Suppressing a finding, with a reason.** `saut.json` `suppress: [{rule, artifact, match?,
+  reason}]`. A suppressed finding stays in every output, marked with its reason (SARIF
+  `suppressions`), and stops counting toward the totals and the exit code; an entry without a
+  reason is ignored (`suppression-invalid`), one that matches nothing is reported
+  (`suppression-unused`). The Studio suppresses and lifts through a diff of `saut.json`.
+- **Security in the Studio.** The Overview's Security card lists the security rules that fire
+  and where, filters the table by rule, names the installed content scanner (or says none is,
+  and links them), and runs it; the scan's findings join the Overview and each artifact.
+
 - **The bench in the loop.** A model per harness (`--model claude-code=sonnet,codex=gpt-6-sol`,
   and a model picker per harness in the Studio) recorded with every run; `--label` / `--pair`
   name runs in a per-artifact history. The Studio's Bench view adds a cost estimate before a
@@ -75,6 +84,9 @@ versions are [semantic](https://semver.org/) and each release is tagged.
 - **Line numbers in a TAUT pack pointed at the engine-gated text,** not the file: after a
   capability marker every finding line was off by the lines the marker pass removed. Findings
   are now mapped back to file lines.
+- **A JSON content scanner's findings belonged to no artifact.** SkillSpector and Snyk report
+  paths relative to what they scanned; unlike the SARIF reader, the JSON reader did not anchor
+  them, so their findings were grouped under a path that does not exist.
 - **Piped output was cut at 64 KB.** The CLI exited right after writing, before a pipe had
   taken the rest, so `saut lint --json | jq` or `--sarif` into an upload step got a truncated
   document on any tree with more than a screenful of findings. Exit now waits for stdout and

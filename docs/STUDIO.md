@@ -23,6 +23,14 @@ fixable findings, always-on and on-invoke tokens, and what its allowlist is on e
 harness. Sort by any column, filter by name, kind or "only with findings"; a row opens the
 artifact. New skills and agents start here.
 
+The **Security** card lists every security rule that fires — and the privilege rules that make
+an injection dangerous (no allowlist, a model-invocable writer, dynamic context) — with the
+artifacts it fires in; a rule filters the table to them. It says which content scanner is
+installed (SkillSpector, Snyk Agent Scan, Cisco skill-scanner — rented, never bundled), runs it
+on the root, and when none is installed says so and links them, rather than implying a clean
+bill. A scan's findings join the Overview and each artifact's Problems until the next scan. The
+card also counts the findings suppressed in `saut.json` and shows a stale or invalid entry.
+
 ## Skill
 
 **Editor, two views of one file.**
@@ -59,7 +67,10 @@ unsaved**); nothing is written.
   A finding with a mechanical fix has a button that opens the diff; **Apply and save** writes
   it and re-lints. The server applies only a fix the linter proposes for the file as it is at
   that moment, and refuses if the file changed since the preview; with unsaved edits, applying
-  is disabled.
+  is disabled. A finding that does not apply here has **Suppress…**: a reason (required), this
+  finding only or the whole rule for this artifact, the `saut.json` diff, then the write. A
+  suppressed finding stays listed, with its reason, under *Suppressed*, and can be lifted the
+  same way (see [RULES.md](RULES.md#suppressing-a-finding)).
 - *Harnesses* — what the allowlist is on each target harness, and what that means.
 - *Cost* — always-on and on-invoke tokens, with the agents the artifact drags in.
 - *Compiled* (TAUT packs) — the exact bytes the installer would write on each harness, with
@@ -121,7 +132,8 @@ A mutating localhost UI, so it mirrors the TAUT panel's contour:
 - an `Origin` check on POST and a `Host` check on everything (DNS-rebinding guard);
 - no CORS headers are ever sent, so a foreign page can read nothing; the page cannot be framed;
 - writes are contained under the root the studio was started with (symlinks resolved), only
-  to a `SKILL.md` or an agent `.md`, never to a file sealed by `taut.lock`;
+  to a `SKILL.md`, an agent `.md`, a case `prompt.md` or `saut.json`, never to a file sealed by
+  `taut.lock`;
 - paths cross the API relative to the root — the page is never told where the root lives;
 - the SSE stream carries the token in its query (EventSource cannot set headers) and is
   read-only.

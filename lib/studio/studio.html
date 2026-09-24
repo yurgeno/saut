@@ -26,8 +26,10 @@
   <!-- ── Overview ─────────────────────────────────────────────── -->
   <section id="view-overview" class="view">
     <div class="summary-cards" id="summaryCards"></div>
+    <div class="card" id="securityCard"></div>
     <div class="toolbar">
       <input type="search" id="ovFilter" placeholder="Filter by name or description">
+      <span id="codeFilterChip"></span>
       <label class="inline"><input type="checkbox" id="ovOnlyFindings"> only with high or medium findings</label>
       <select id="ovKind"><option value="">skills and agents</option><option value="skill">skills</option><option value="agent">agents</option></select>
       <span class="spacer"></span>
@@ -198,6 +200,14 @@
   <div class="modal-box">
     <h2 id="modalTitle"></h2>
     <div id="modalNote" class="muted"></div>
+    <div id="modalForm" hidden>
+      <label for="modalReason">Why this finding does not apply here <span class="muted">— kept in saut.json next to the entry, shown wherever the finding is</span></label>
+      <textarea id="modalReason" rows="3" placeholder="e.g. prose that forbids echoing credentials — not a read"></textarea>
+      <div class="row">
+        <label class="inline"><input type="radio" name="scope" value="one" checked> this finding only <code id="scopeMatch"></code></label>
+        <label class="inline"><input type="radio" name="scope" value="all"> every <code id="scopeRule"></code> finding in this artifact</label>
+      </div>
+    </div>
     <pre id="modalDiff" class="diff"></pre>
     <div class="row">
       <button class="btn primary" id="modalApply">Apply and save</button>

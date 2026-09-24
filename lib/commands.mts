@@ -7,6 +7,7 @@ import { loadHarnesses } from './caps.mts';
 import { costOf, estimateTokens, overBudget, validateBudgets } from './cost.mts';
 import { lintArtifact, matrix, sortDiags, toSarif } from './lint.mts';
 import { explain } from './rules.mts';
+import { active, applySuppressions, loadSuppressions, namesOf } from './suppress.mts';
 import { deploymentOf, guidanceStatus, lintGuidance, lintModelTiers, localCatalogs, sandboxedAgents } from './guidance.mts';
 import { applyFix, lineDiff } from './fix.mts';
 import { discoverDetailed, loadAgent, toFileLines } from './skill.mts';
@@ -146,7 +147,10 @@ export async function runLint(targets: string[], opts: Opts): Promise<{ diagnost
     diagnostics.push(...r.diagnostics);
     scanNote = r.note; scanners = r.ran;
   }
-  return { diagnostics: sortDiags(explain(diagnostics)), artifacts, harnesses, taut, note, ignored, scanNote, scanners };
+  // saut.json suppressions: marked, not dropped; a stale one is reported
+  const suppressions = await loadSuppressions(taut ? taut.packRoot : path.resolve(targets[0] ?? '.'));
+  const marked = applySuppressions(diagnostics, namesOf(artifacts), suppressions);
+  return { diagnostics: sortDiags(explain(marked)), artifacts, harnesses, taut, note, ignored, scanNote, scanners };
 }
 
 export async function cmdLint(opts: Opts): Promise<number> {
@@ -155,8 +159,9 @@ export async function cmdLint(opts: Opts): Promise<number> {
   const { diagnostics, artifacts, harnesses, taut, note, ignored, scanNote, scanners } = await runLint(opts._, opts);
   // one verdict for every output format — a CI job that adds --json must not stop catching
   // "the target matched nothing"
+  const live = active(diagnostics);
   const exit = !artifacts.length ? 1
-    : diagnostics.some((x) => x.severity === 'high') || (opts.strict && diagnostics.some((x) => x.severity === 'medium')) ? 1 : 0;
+    : live.some((x) => x.severity === 'high') || (opts.strict && live.some((x) => x.severity === 'medium')) ? 1 : 0;
   if (opts.sarif) { process.stdout.write(JSON.stringify(toSarif(diagnostics, VERSION, path.resolve(opts._[0] ?? '.')), null, 2) + '\n'); }
   else if (opts.json) { process.stdout.write(JSON.stringify({ version: VERSION, artifacts: artifacts.map((a) => ({ kind: a.kind, name: a.name, path: a.path })), ignored, diagnostics }, null, 2) + '\n'); }
   else {
@@ -172,9 +177,11 @@ export async function cmdLint(opts: Opts): Promise<number> {
     for (const a of artifacts) {
       const ds = byPath.get(a.path) ?? [];
       const tag = a.kind === 'skill' ? 'skill' : 'agent';
-      process.stdout.write(`${c.bold(`${tag} ${a.name}`)} ${c.dim(rel(a.path))} — ${ds.length ? count(ds.length, 'finding') : c.green('clean')}\n`);
+      const n = ds.filter((y) => !y.suppressed).length, s = ds.length - n;
+      process.stdout.write(`${c.bold(`${tag} ${a.name}`)} ${c.dim(rel(a.path))} — ${n ? count(n, 'finding') : c.green('clean')}${s ? c.dim(` (${s} suppressed)`) : ''}\n`);
       const told = new Set<string>();   // the rule-level advice once per artifact; a concrete autofix every time
-      for (const x of ds) {
+      for (const x of ds.filter((y) => y.suppressed)) process.stdout.write(c.dim(`  suppressed ${x.code}${x.line ? `:${x.line}` : ''} — ${x.suppressed!.reason}\n`));
+      for (const x of ds.filter((y) => !y.suppressed)) {
         const sev = x.severity === 'high' ? c.red('high  ') : x.severity === 'medium' ? c.yellow('medium') : x.severity === 'low' ? 'low   ' : c.dim('info  ');
         process.stdout.write(`  ${sev} ${x.code}${x.harness ? c.dim(` [${x.harness}]`) : ''}${x.line ? c.dim(`:${x.line}`) : ''} — ${x.message}${x.precedent ? c.dim(` (${x.precedent})`) : ''}\n`);
         if (x.autofix) process.stdout.write(c.dim(`         → ${x.autofix.label} (saut lint --fix)\n`));
@@ -184,15 +191,20 @@ export async function cmdLint(opts: Opts): Promise<number> {
       const m = matrix(a, harnesses);
       process.stdout.write(`  ${c.dim('enforcement')} ${m.map((r) => `${r.harness}=${r.allowlist}`).join(' · ')}\n`);
     }
-    const hi = diagnostics.filter((x) => x.severity === 'high').length;
-    const med = diagnostics.filter((x) => x.severity === 'medium').length;
-    if (artifacts.length) process.stdout.write(`\n${count(artifacts.length, 'artifact')}, ${count(diagnostics.length, 'finding')} (${hi} high, ${med} medium)\n`);
+    // findings about saut.json itself (a stale or invalid suppression) belong to no artifact
+    const known = new Set(artifacts.map((a) => a.path));
+    for (const x of live.filter((y) => !known.has(y.path))) process.stdout.write(`${c.yellow(x.severity.padEnd(6))} ${x.code} ${c.dim(rel(x.path))} — ${x.message}\n`);
+    const hi = live.filter((x) => x.severity === 'high').length;
+    const med = live.filter((x) => x.severity === 'medium').length;
+    const sup = diagnostics.length - live.length;
+    if (artifacts.length) process.stdout.write(`\n${count(artifacts.length, 'artifact')}, ${count(live.length, 'finding')} (${hi} high, ${med} medium)${sup ? `, ${sup} suppressed in saut.json` : ''}\n`);
   }
   return exit;
 }
 
 // ---- lint --fix: the mechanical fixes as a diff; --write applies them and re-lints ---------
 function lintExit(ds: Diagnostic[], found: number, opts: Opts): number {
+  ds = active(ds);
   return !found ? 1 : ds.some((x) => x.severity === 'high') || (opts.strict && ds.some((x) => x.severity === 'medium')) ? 1 : 0;
 }
 
@@ -201,7 +213,7 @@ async function cmdFix(opts: Opts): Promise<number> {
   const known = new Set(artifacts.map((a) => a.path));        // write only files the walk found
   const only = new Set((opts.only ?? '').split(',').map((x) => x.trim()).filter(Boolean));
   const byPath = new Map<string, Diagnostic[]>();
-  for (const x of diagnostics) if (x.autofix && known.has(x.path)) byPath.set(x.path, [...(byPath.get(x.path) ?? []), x]);
+  for (const x of diagnostics) if (x.autofix && !x.suppressed && known.has(x.path)) byPath.set(x.path, [...(byPath.get(x.path) ?? []), x]);
   const files: { path: string; applied: string[]; skipped: { fix: string; reason: string }[]; diff: string; written: boolean }[] = [];
   for (const [file, ds] of byPath) {
     const before = await readText(file);
@@ -230,7 +242,7 @@ async function cmdFix(opts: Opts): Promise<number> {
   }
   const after = opts.write && files.some((f) => f.written) ? (await runLint(opts._, opts)).diagnostics : diagnostics;
   if (opts.json) {
-    process.stdout.write(JSON.stringify({ version: VERSION, write: !!opts.write, files: files.map((f) => ({ ...f })), remaining: after.length }, null, 2) + '\n');
+    process.stdout.write(JSON.stringify({ version: VERSION, write: !!opts.write, files: files.map((f) => ({ ...f })), remaining: active(after).length }, null, 2) + '\n');
     return lintExit(after, artifacts.length, opts);
   }
   if (!files.length) process.stdout.write('no mechanical fixes for these findings — see the advice under each one in `saut lint`\n');
@@ -241,7 +253,7 @@ async function cmdFix(opts: Opts): Promise<number> {
     if (f.diff) process.stdout.write(f.diff.split('\n').map((l) => `    ${l.startsWith('+') ? c.green(l) : l.startsWith('-') ? c.red(l) : c.dim(l)}`).join('\n') + '\n');
   }
   const total = files.reduce((n, f) => n + f.applied.length, 0);
-  if (opts.write) process.stdout.write(`\n${count(total, 'fix', 'fixes')} applied · ${count(diagnostics.length, 'finding')} before → ${after.length} after\n`);
+  if (opts.write) process.stdout.write(`\n${count(total, 'fix', 'fixes')} applied · ${count(active(diagnostics).length, 'finding')} before → ${active(after).length} after\n`);
   else if (total) process.stdout.write(c.dim(`\n${count(total, 'fix', 'fixes')} available — nothing written. --write applies the safe ones; a review fix also needs --only <rule>\n`));
   return lintExit(after, artifacts.length, opts);
 }

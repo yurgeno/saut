@@ -147,7 +147,8 @@ export function applyFix(text: string, fix: Autofix): FixResult {
 // (the spec caps a body at 500 lines), so the quadratic table is fine; past a guard the whole
 // file is shown as replaced rather than spending seconds on a preview.
 export function lineDiff(before: string, after: string, context = 2): string {
-  const a = before.split(/\r?\n/), b = after.split(/\r?\n/);
+  // a file that does not exist yet has no lines, not one empty line
+  const a = before === '' ? [] : before.split(/\r?\n/), b = after === '' ? [] : after.split(/\r?\n/);
   if (before === after) return '';
   const n = a.length, m = b.length;
   type Op = { t: ' ' | '-' | '+'; ai: number; bi: number };

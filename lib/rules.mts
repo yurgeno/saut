@@ -146,6 +146,16 @@ export const RULES: Record<string, RuleInfo> = {
     why: 'Usually capability-marker branches (fine in a TAUT pack); otherwise the later value silently wins.',
     fix: 'Outside marker branches, keep one occurrence.',
   },
+  'suppression-invalid': {
+    category: 'hygiene', title: 'Invalid suppression',
+    why: 'A suppression without a rule, an artifact or a reason is ignored — the finding it meant to silence still counts.',
+    fix: 'Give the entry in saut.json a "rule", an "artifact" and a "reason" of a sentence: why this finding does not apply here.',
+  },
+  'suppression-unused': {
+    category: 'hygiene', title: 'Suppression matches nothing',
+    why: 'The finding it silenced was fixed, or the entry drifted from it; a stale exemption would silently cover the next real finding.',
+    fix: 'Remove the entry from saut.json (or correct its rule, artifact or match).',
+  },
   'load-failed': {
     category: 'syntax', title: 'File could not be read',
     why: 'An unreadable artifact is invisible to every check.',

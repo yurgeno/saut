@@ -120,7 +120,7 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
       note,
       mode: taut ? 'taut' : locked.size ? 'compiled' : 'generic',
       // what this backend can do — the page shows or hides by these, never by guessing where it runs
-      capabilities: { write: true, fix: true, check: true, compose: true, bench: harnesses.some((h) => h.runner), validate: !!taut, history: false, llmReview: false },
+      capabilities: { write: true, fix: true, check: true, compose: true, bench: harnesses.some((h) => h.runner), validate: !!taut, history: true, suppress: true, scan: true, llmReview: false },
       taut: taut ? { engineCommit: taut.engineCommit, deployment: taut.project?.name ?? null, projects: taut.projects.map((p) => p.name) } : null,
       harnesses: harnesses.map((h) => ({
         id: h.id, title: h.title, runner: !!h.runner, skillsDirs: h.skillsDirs, agentsDir: h.agentsDir, docs: h.docs,
@@ -172,6 +172,9 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
     const dep = taut ? await deploymentOf(taut) : null;
     findings.push(...lintGuidance(a, { harnesses, local: await localCatalogs(harnesses), taut, sandboxed: sandboxedAgents(dep) }));
     findings = [...toFileLines(findings, a), ...engine];      // file lines, the ones the editor shows
+    if (lastScan) findings.push(...lastScan.diagnostics.filter((x) => x.path === a.path));
+    const { applySuppressions, loadSuppressions } = await import('../suppress.mts');
+    findings = applySuppressions(findings, new Map([[a.path, a.name]]), await loadSuppressions(a.path), { reportUnused: false });
     const cost = await costOf(a, { harness: harnesses.find((h) => h.id === 'claude-code') ?? null, exact: false, agentsByName: agentsByName as Map<string, Artifact> });
     const compiled = taut && text === undefined ? (await previews(a, taut)).map((p) => ({ harness: p.harness, id: p.id, bytes: p.bytes, transform: p.transform, degradations: p.degradations, content: p.content.slice(0, 200000) })) : [];
     const source = text ?? await readText(a.path);
@@ -193,6 +196,7 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
   async function overview() {
     const { runLint } = await import('../commands.mts');
     const lint = await runLint([root], opts);
+    if (lastScan) lint.diagnostics.push(...explain(lastScan.diagnostics));
     const locked = await lockMap();
     const byPath = new Map<string, Diagnostic[]>();
     for (const x of lint.diagnostics) byPath.set(x.path, [...(byPath.get(x.path) ?? []), x]);
@@ -207,13 +211,16 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
       const prev = rows.get(key);
       if (prev) { prev.copies.push({ path: relOf(a.path), harness }); continue; }
       const cost = await costOf(a, { harness: cc, exact: false, agentsByName: new Map(lint.artifacts.filter((x) => x.kind === 'agent').map((x) => [x.name, x])) as Map<string, Artifact> });
-      const count = (s: string) => ds.filter((x) => x.severity === s).length;
+      const live = ds.filter((x) => !x.suppressed);
+      const count = (s: string) => live.filter((x) => x.severity === s).length;
       rows.set(key, {
         kind: a.kind, name: a.name, path: relOf(a.path), description: a.description,
         high: count('high'), medium: count('medium'), low: count('low'), info: count('info'),
-        fixable: ds.filter((x) => x.autofix).length,
-        guidance: { A: ds.filter((x) => x.guidance?.class === 'A').length, B: ds.filter((x) => x.guidance?.class === 'B').length, D: ds.filter((x) => x.guidance?.class === 'D').length },
-        security: ds.filter((x) => x.category === 'security').length,
+        fixable: live.filter((x) => x.autofix).length,
+        guidance: { A: live.filter((x) => x.guidance?.class === 'A').length, B: live.filter((x) => x.guidance?.class === 'B').length, D: live.filter((x) => x.guidance?.class === 'D').length },
+        security: live.filter((x) => x.category === 'security' || x.category === 'scanner').length,
+        suppressed: ds.length - live.length,
+        codes: [...new Set(live.map((x) => x.code))],
         alwaysOn: cost.alwaysOnTokens, invoke: cost.invokeTokens + (cost.transitive ?? []).reduce((n, t) => n + t.tokens, 0),
         enforcement: Object.fromEntries(matrix(a, lint.harnesses).map((m) => [m.harness, m.allowlist])),
         compiled: c ? { source: c.source, pack: c.pack, commit: c.commit } : null,
@@ -222,7 +229,25 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
     }
     const list = [...rows.values()];
     const sum = (k: string) => list.reduce((n, r) => n + r[k], 0);
+    // Security at a glance: every security finding by rule, the artifacts it is in, and what
+    // the content scanner said (or that none is installed).
+    const sec = new Map<string, { code: string; title: string; severity: string; artifacts: Set<string> }>();
+    for (const x of lint.diagnostics) {
+      if (x.suppressed || !(x.category === 'security' || x.category === 'scanner' || x.code === 'no-allowlist' || x.code === 'model-invocable-writer' || x.code === 'dynamic-context')) continue;
+      const name = lint.artifacts.find((a) => a.path === x.path)?.name ?? relOf(x.path);
+      const e = sec.get(x.code) ?? { code: x.code, title: x.title ?? x.code, severity: x.severity, artifacts: new Set<string>() };
+      e.artifacts.add(name); sec.set(x.code, e);
+    }
+    const { detectScanners, SCANNERS } = await import('../scan.mts');
+    const installed = (await detectScanners()).map((x) => x.id);
+    const outside = lint.diagnostics.filter((x) => !x.suppressed && !lint.artifacts.some((a) => a.path === x.path)).map((x) => ({ ...x, path: relOf(x.path) }));
     return {
+      security: {
+        rules: [...sec.values()].map((e) => ({ ...e, artifacts: [...e.artifacts].sort() })).sort((a, b) => (a.severity === 'high' ? 0 : 1) - (b.severity === 'high' ? 0 : 1) || b.artifacts.length - a.artifacts.length),
+        scanners: { installed, known: SCANNERS.map((x) => ({ id: x.id, home: x.home })), last: lastScan ? { at: lastScan.at, ran: lastScan.ran, note: lastScan.note, findings: lastScan.diagnostics.length } : null },
+        suppressed: lint.diagnostics.filter((x) => x.suppressed).length,
+        config: outside,
+      },
       rows: list,
       totals: { artifacts: list.length, high: sum('high'), medium: sum('medium'), fixable: sum('fixable'), security: sum('security'), alwaysOn: sum('alwaysOn'),
         outdated: list.reduce((n, r) => n + r.guidance.A, 0), hypotheses: list.reduce((n, r) => n + r.guidance.B, 0) },
@@ -497,6 +522,53 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
     return id;
   }
 
+  // A content scan of the root by whichever scanner is installed; its findings join the
+  // passport and the Overview until the next scan (they are not stored anywhere).
+  let lastScan: { at: string; ran: string[]; note: string | null; diagnostics: Diagnostic[] } | null = null;
+  async function runScan() {
+    const { scan } = await import('../scan.mts');
+    const { taut } = await load([root], opts);
+    const r = await scan(taut ? taut.packRoot : root);
+    lastScan = { at: new Date().toISOString(), ran: r.ran, note: r.note, diagnostics: r.diagnostics };
+    return { ran: r.ran, note: r.note, findings: r.diagnostics.length };
+  }
+
+  // Suppress a finding — or lift a suppression — in saut.json: the nearest one above the
+  // artifact when it lies under the root, else <root>/saut.json. Previewed as a diff, applied
+  // against the hash of the file as previewed, like every other write.
+  async function suppress(payload: any) {
+    const abs = resolveIn(payload.path);
+    if (!(await contained(abs))) throw new Error('path outside the studio root');
+    const { findConfig, MIN_REASON } = await import('../suppress.mts');
+    const near = await findConfig(abs);
+    const file = near && (await contained(near)) ? near : path.join(root, 'saut.json');
+    const before = (await exists(file)) ? await readText(file) : '';
+    let cfg: any = {};
+    if (before) { try { cfg = JSON.parse(before); } catch { throw new Error(`${relOf(file)} does not parse — fix it by hand first`); } }
+    if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) throw new Error(`${relOf(file)} is not a JSON object`);
+    const list: any[] = Array.isArray(cfg.suppress) ? cfg.suppress : [];
+    const rule = String(payload.rule ?? ''), artifact = String(payload.artifact ?? '');
+    if (!/^[a-z0-9_-]{2,80}$/.test(rule) || !NAME.test(artifact)) throw new Error('a suppression names a rule and an artifact');
+    const match = typeof payload.match === 'string' && payload.match ? payload.match.slice(0, 200) : undefined;
+    if (payload.remove) {
+      const i = list.findIndex((e) => e?.rule === rule && e?.artifact === artifact && (e?.match ?? undefined) === match);
+      if (i < 0) throw new Error('no such suppression');
+      list.splice(i, 1);
+    } else {
+      const reason = String(payload.reason ?? '').trim();
+      if (reason.length < MIN_REASON) throw new Error(`a suppression needs a reason — at least ${MIN_REASON} characters on why the finding does not apply here`);
+      list.push({ rule, artifact, ...(match ? { match } : {}), reason });
+    }
+    cfg.suppress = list;
+    if (!list.length) delete cfg.suppress;
+    const after = JSON.stringify(cfg, null, 2) + '\n';
+    const base = hashOf(before);
+    if (!payload.apply) return { file: relOf(file), diff: lineDiff(before, after), base };
+    if (payload.base !== base) throw new Error('saut.json changed since the preview — review it again');
+    await writeContained(file, after, !before);
+    return { file: relOf(file), applied: true };
+  }
+
   // The cases a bench runs: authored under evals/, else the three generated ones.
   async function cases(file: string) {
     const abs = resolveIn(file);
@@ -689,6 +761,12 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
           if (pathname === '/api/fix') return send(200, await fix(payload));
           if (pathname === '/api/test') return send(200, { id: await startBench(payload) });
           if (pathname === '/api/case') return send(200, await saveCase(payload));
+          if (pathname === '/api/suppress') return send(200, await suppress(payload));
+          if (pathname === '/api/scan') {
+            if (busy) return send(409, { error: 'another action is still running' });
+            busy = true;
+            try { return send(200, await runScan()); } finally { busy = false; }
+          }
           if (pathname === '/api/estimate') return send(200, await estimate(payload));
           if (pathname === '/api/validate') {
             if (busy) return send(409, { error: 'another action is still running' });

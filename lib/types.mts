@@ -24,6 +24,7 @@ export interface Diagnostic {
   doc?: string;            // where the rule is documented
   heuristic?: boolean;     // the rule reads prose/patterns and can be wrong for this artifact
   guidance?: GuidanceMark; // a vendor-guidance finding: its class, when it was verified, from where
+  suppressed?: { reason: string; file: string };   // silenced in saut.json — kept, marked, not counted
 }
 
 export type RuleCategory = 'security' | 'privileges' | 'hygiene' | 'syntax' | 'taut' | 'scanner' | 'guidance';

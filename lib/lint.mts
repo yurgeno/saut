@@ -267,6 +267,7 @@ export function toSarif(ds: Diagnostic[], version: string, base?: string): unkno
       ...(base ? { originalUriBaseIds: { ROOT: { uri: `file://${base.endsWith('/') ? base : base + '/'}` } } } : {}),
       results: ds.map((x) => ({
         ruleId: x.code, level: level(x.severity), message: { text: x.message + (x.harness ? ` [${x.harness}]` : '') },
+        ...(x.suppressed ? { suppressions: [{ kind: 'external', justification: x.suppressed.reason }] } : {}),
         // GitHub code scanning needs a URI relative to a checkout root; an absolute local
         // path either fails upload or attaches findings to a file nobody has.
         locations: [{ physicalLocation: { artifactLocation: { uri: base ? path.relative(base, x.path) : x.path, uriBaseId: base ? 'ROOT' : undefined }, region: { startLine: x.line ?? 1 } } }],
