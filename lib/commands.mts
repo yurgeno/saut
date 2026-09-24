@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { loadHarnesses } from './caps.mts';
 import { costOf, estimateTokens, overBudget, validateBudgets } from './cost.mts';
 import { lintArtifact, matrix, sortDiags, toSarif } from './lint.mts';
+import { explain } from './rules.mts';
+import { applyFix, lineDiff } from './fix.mts';
 import { discoverDetailed, loadAgent } from './skill.mts';
 import { buildRegistry } from './tools.mts';
 import { scan } from './scan.mts';
@@ -31,6 +33,9 @@ export interface Opts {
   exact?: boolean;
   budget?: string;
   strict?: boolean;        // exit 1 on medium too
+  fix?: boolean;           // lint: print the mechanical fixes as a diff
+  write?: boolean;         // lint --fix: apply the safe ones (+ review ones listed in --only)
+  only?: string;           // lint --fix --write: rule codes whose review fixes may be written
   /** internal: a load already performed by the caller (passport reuses lint's) */
   preloaded?: { artifacts: Artifact[]; harnesses: HarnessCaps[]; taut: TautContext | null };
   taut?: string;           // TAUT engine dir (adapter); auto: SAUT_TAUT_ENGINE, ~/taut, ~/federation
@@ -133,10 +138,12 @@ export async function runLint(targets: string[], opts: Opts): Promise<{ diagnost
     diagnostics.push(...r.diagnostics);
     scanNote = r.note; scanners = r.ran;
   }
-  return { diagnostics: sortDiags(diagnostics), artifacts, harnesses, taut, note, ignored, scanNote, scanners };
+  return { diagnostics: sortDiags(explain(diagnostics)), artifacts, harnesses, taut, note, ignored, scanNote, scanners };
 }
 
 export async function cmdLint(opts: Opts): Promise<number> {
+  if (opts.write && !opts.fix) { process.stderr.write('saut: --write applies fixes — use it with --fix\n'); return 2; }
+  if (opts.fix) return cmdFix(opts);
   const { diagnostics, artifacts, harnesses, taut, note, ignored, scanNote, scanners } = await runLint(opts._, opts);
   // one verdict for every output format — a CI job that adds --json must not stop catching
   // "the target matched nothing"
@@ -158,9 +165,13 @@ export async function cmdLint(opts: Opts): Promise<number> {
       const ds = byPath.get(a.path) ?? [];
       const tag = a.kind === 'skill' ? 'skill' : 'agent';
       process.stdout.write(`${c.bold(`${tag} ${a.name}`)} ${c.dim(rel(a.path))} — ${ds.length ? count(ds.length, 'finding') : c.green('clean')}\n`);
+      const told = new Set<string>();   // the rule-level advice once per artifact; a concrete autofix every time
       for (const x of ds) {
         const sev = x.severity === 'high' ? c.red('high  ') : x.severity === 'medium' ? c.yellow('medium') : x.severity === 'low' ? 'low   ' : c.dim('info  ');
         process.stdout.write(`  ${sev} ${x.code}${x.harness ? c.dim(` [${x.harness}]`) : ''}${x.line ? c.dim(`:${x.line}`) : ''} — ${x.message}${x.precedent ? c.dim(` (${x.precedent})`) : ''}\n`);
+        if (x.autofix) process.stdout.write(c.dim(`         → ${x.autofix.label} (saut lint --fix)\n`));
+        else if (x.fix && !told.has(x.code)) process.stdout.write(c.dim(`         → ${x.fix}\n`));
+        told.add(x.code);
       }
       const m = matrix(a, harnesses);
       process.stdout.write(`  ${c.dim('enforcement')} ${m.map((r) => `${r.harness}=${r.allowlist}`).join(' · ')}\n`);
@@ -170,6 +181,61 @@ export async function cmdLint(opts: Opts): Promise<number> {
     if (artifacts.length) process.stdout.write(`\n${count(artifacts.length, 'artifact')}, ${count(diagnostics.length, 'finding')} (${hi} high, ${med} medium)\n`);
   }
   return exit;
+}
+
+// ---- lint --fix: the mechanical fixes as a diff; --write applies them and re-lints ---------
+function lintExit(ds: Diagnostic[], found: number, opts: Opts): number {
+  return !found ? 1 : ds.some((x) => x.severity === 'high') || (opts.strict && ds.some((x) => x.severity === 'medium')) ? 1 : 0;
+}
+
+async function cmdFix(opts: Opts): Promise<number> {
+  const { diagnostics, artifacts } = await runLint(opts._, opts);
+  const known = new Set(artifacts.map((a) => a.path));        // write only files the walk found
+  const only = new Set((opts.only ?? '').split(',').map((x) => x.trim()).filter(Boolean));
+  const byPath = new Map<string, Diagnostic[]>();
+  for (const x of diagnostics) if (x.autofix && known.has(x.path)) byPath.set(x.path, [...(byPath.get(x.path) ?? []), x]);
+  const files: { path: string; applied: string[]; skipped: { fix: string; reason: string }[]; diff: string; written: boolean }[] = [];
+  for (const [file, ds] of byPath) {
+    const before = await readText(file);
+    let text = before;
+    const applied: string[] = [], skipped: { fix: string; reason: string }[] = [];
+    const seen = new Set<string>();
+    for (const x of ds) {
+      const key = JSON.stringify(x.autofix);
+      if (seen.has(key)) continue;                              // two findings, one fix
+      seen.add(key);
+      // a review fix is shown in the preview but written only when its rule is named
+      if (opts.write && x.autofix!.safety === 'review' && !only.has(x.code)) {
+        skipped.push({ fix: x.autofix!.label, reason: `review — check the diff, then --only ${x.code}` });
+        continue;
+      }
+      const r = applyFix(text, x.autofix!);
+      if (r.ok) { if (r.text !== text) applied.push(x.autofix!.label + (x.autofix!.safety === 'review' ? ' (review)' : '')); text = r.text; }
+      else skipped.push({ fix: x.autofix!.label, reason: r.reason ?? 'refused' });
+    }
+    let written = false;
+    if (opts.write && text !== before) {
+      if ((await fs.lstat(file)).isSymbolicLink()) skipped.push({ fix: 'write', reason: 'the file is a symlink — not written' });
+      else { await fs.writeFile(file, text); written = true; }
+    }
+    files.push({ path: file, applied, skipped, diff: lineDiff(before, text), written });
+  }
+  const after = opts.write && files.some((f) => f.written) ? (await runLint(opts._, opts)).diagnostics : diagnostics;
+  if (opts.json) {
+    process.stdout.write(JSON.stringify({ version: VERSION, write: !!opts.write, files: files.map((f) => ({ ...f })), remaining: after.length }, null, 2) + '\n');
+    return lintExit(after, artifacts.length, opts);
+  }
+  if (!files.length) process.stdout.write('no mechanical fixes for these findings — see the advice under each one in `saut lint`\n');
+  for (const f of files) {
+    process.stdout.write(`${c.bold(rel(f.path))} — ${count(f.applied.length, 'fix', 'fixes')}${f.written ? c.green(' written') : ''}\n`);
+    for (const a of f.applied) process.stdout.write(`  ${c.green('✓')} ${a}\n`);
+    for (const k of f.skipped) process.stdout.write(`  ${c.yellow('–')} ${k.fix} ${c.dim(`— ${k.reason}`)}\n`);
+    if (f.diff) process.stdout.write(f.diff.split('\n').map((l) => `    ${l.startsWith('+') ? c.green(l) : l.startsWith('-') ? c.red(l) : c.dim(l)}`).join('\n') + '\n');
+  }
+  const total = files.reduce((n, f) => n + f.applied.length, 0);
+  if (opts.write) process.stdout.write(`\n${count(total, 'fix', 'fixes')} applied · ${count(diagnostics.length, 'finding')} before → ${after.length} after\n`);
+  else if (total) process.stdout.write(c.dim(`\n${count(total, 'fix', 'fixes')} available — nothing written. --write applies the safe ones; a review fix also needs --only <rule>\n`));
+  return lintExit(after, artifacts.length, opts);
 }
 
 // ---- cost ---------------------------------------------------------------------------

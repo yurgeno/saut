@@ -4,10 +4,11 @@
 //
 // No score. A finding is a finding; the per-harness `enforcement` column says whether the
 // declared allowlist is a restriction, a grant, prose, or dropped on that harness.
-import type { AgentArtifact, Artifact, Diagnostic, HarnessCaps, ToolRef, ToolRegistry } from './types.mts';
+import type { AgentArtifact, Artifact, Autofix, Diagnostic, HarnessCaps, ToolRef, ToolRegistry } from './types.mts';
 import { bodyToolMentions } from './skill.mts';
 import path from 'node:path';
 import { classifyTool } from './tools.mts';
+import { docFor, ruleInfo } from './rules.mts';
 
 export const SPEC_DESCRIPTION_MAX = 1024;
 
@@ -28,10 +29,10 @@ const READONLY_CLAIM_BODY = /^\s*(?:>|\*\*|[-*] )?\s*read[- ]only\b|\bthis (?:sk
 const EXTERNAL_INPUT = /\b(jira|ticket|tracker|attachment|webfetch|websearch|web page|url|http[s]?:\/\/|context7|mcp__atlassian|mcp__context7|scrap|fetch)\b/i;
 const UNTRUSTED_RULE = /\b(untrusted|treat(?:ed)? as data|is data,? not|not (?:as )?instructions?|prompt[- ]injection|never follow instructions)\b/i;
 const INJECTION = [
-  { re: /ignore (?:all |any )?(?:previous|prior|above) instructions/i, what: '"ignore previous instructions" phrase' },
-  { re: /[​-‏⁠﻿‪-‮]/, what: 'invisible/bidi Unicode control characters' },
-  { re: /\b(curl|wget)\b[^\n]*\|\s*(sh|bash|zsh|node|python)\b/i, what: 'download-and-execute pipeline' },
-  { re: /\b(?:cat|echo|printf)\b[^\n]*(?:\.env|id_rsa|\.aws\/credentials|\.netrc)/i, what: 'reads credential files' },
+  { re: /ignore (?:all |any )?(?:previous|prior|above) instructions/i, what: 'contains an "ignore previous instructions" phrase' },
+  { re: /[​-‏⁠﻿‪-‮]/, what: 'contains invisible/bidi Unicode control characters' },
+  { re: /\b(curl|wget)\b[^\n]*\|\s*(sh|bash|zsh|node|python)\b/i, what: 'contains a download-and-execute pipeline' },
+  { re: /\b(?:cat|echo|printf)\b[^\n]*(?:\.env|id_rsa|\.aws\/credentials|\.netrc)/i, what: 'reads a credential file' },
 ];
 const SECRET = [
   /\b(sk-ant-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{32,}|ghp_[A-Za-z0-9]{36}|glpat-[A-Za-z0-9_-]{20}|xox[baprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16})\b/,
@@ -43,6 +44,16 @@ const DYNAMIC_CONTEXT = /!`[^`]+`/;
 function d(a: Artifact, code: string, severity: Diagnostic['severity'], message: string, extra: Partial<Diagnostic> = {}): Diagnostic {
   return { code, severity, message, path: a.path, ...extra };
 }
+
+// 1-based file line of the first body match — findings about the body point at it.
+function bodyLine(a: Artifact, re: RegExp): number | undefined {
+  const m = re.exec(a.body);
+  if (!m) return undefined;
+  return a.fm.bodyOffset + a.body.slice(0, m.index).split('\n').length - 1;
+}
+
+// Current names for tools older harness versions called otherwise.
+const LEGACY_REPLACEMENT: Record<string, string> = { MultiEdit: 'Edit', LS: 'Glob', NotebookRead: 'Read', Task: 'Agent', SlashCommand: 'Skill' };
 
 function isWriteRef(t: ToolRef): boolean {
   if (t.mcp) return !!t.mcp.tool && WRITE_MCP.test(t.mcp.tool);
@@ -89,7 +100,14 @@ export function lintArtifact(a: Artifact, o: LintOptions): Diagnostic[] {
         const v = classifyTool(t, o.registry, h.id);
         if (h.id !== primary?.id && (v === 'unknown' || v === 'legacy')) continue;   // builtin names are Claude-Code-shaped; judge once
         if (v === 'unknown') out.push(d(a, 'unknown-tool', 'high', `"${t.raw}" is not a known tool name on ${h.title} — a dead name grants nothing and masks the capability loss`, { line: listLine, harness: h.id }));
-        else if (v === 'legacy') out.push(d(a, 'legacy-tool', 'info', `"${t.base}" is a legacy tool name on ${h.title}`, { line: listLine, harness: h.id }));
+        else if (v === 'legacy') {
+          const now = LEGACY_REPLACEMENT[t.base];
+          const autofix: Autofix | undefined = !now || t.spec ? undefined
+            : list.some((x) => x.base === now)
+              ? (list.length > 1 ? { op: 'list-remove', key: listKey, item: t.raw, label: `Remove ${t.raw} (${now} is already granted)`, safety: 'safe' } : undefined)
+              : { op: 'list-replace', key: listKey, item: t.raw, with: now, label: `Replace ${t.raw} with ${now}`, safety: 'safe' };
+          out.push(d(a, 'legacy-tool', 'info', `"${t.base}" is a legacy tool name on ${h.title}${now ? ` — the current name is ${now}` : ''}`, { line: listLine, harness: h.id, autofix }));
+        }
         else if (v === 'mcp-unknown-server') out.push(d(a, 'unknown-mcp-server', 'high', `"${t.raw}" names MCP server "${t.mcp!.server}", which the catalog does not list`, { line: listLine, precedent: 'C1' }));
         else if (v === 'mcp-unknown-tool') out.push(d(a, 'unknown-mcp-tool', 'high', `"${t.raw}" is not among the tools the catalog lists for server "${t.mcp!.server}"`, { line: listLine, precedent: 'C1' }));
       }
@@ -104,7 +122,8 @@ export function lintArtifact(a: Artifact, o: LintOptions): Diagnostic[] {
         ? [...mentions.mcp].some((m) => m === t.base || (t.mcp!.tool === null && m.startsWith(`mcp__${t.mcp!.server}__`)) || (t.mcp!.tool?.includes('*') && m.startsWith(t.base.replace('*', ''))))
           || (serverWord?.test(a.body) ?? false) || (toolWord && toolWord.source.length > 6 && toolWord.test(a.body))
         : mentions.builtin.has(t.base) || mentions.evidence.has(t.base);
-      if (!referenced) out.push(d(a, 'dead-privilege', 'medium', `"${t.raw}" is granted but the body never mentions it — remove it, or say where it is used`, { line: listLine, precedent: 'S4' }));
+      if (!referenced) out.push(d(a, 'dead-privilege', 'medium', `"${t.raw}" is granted but the body never mentions it — remove it, or say where it is used`,
+        { line: listLine, precedent: 'S4', autofix: list.length > 1 ? { op: 'list-remove', key: listKey, item: t.raw, label: `Remove ${t.raw} from ${listKey}`, safety: 'review' } : undefined }));
     }
     // body cites a tool the allowlist does not carry (silent degradation)
     const declaredMcp = list.filter((t) => t.mcp);
@@ -115,11 +134,11 @@ export function lintArtifact(a: Artifact, o: LintOptions): Diagnostic[] {
         || (wildcard && t.mcp!.server === server)
         || (t.mcp!.tool === null && m.startsWith(`mcp__${t.mcp!.server}__`))
         || (t.mcp!.tool?.includes('*') && m.startsWith(t.base.replace(/\*.*$/, ''))));
-      if (!ok) out.push(d(a, 'body-tool-not-allowed', 'high', `body cites ${m}, which is not in \`${listKey}\` — the harness will not have it (or will prompt); the feature is dead or degraded`, { precedent: 'C1' }));
+      if (!ok) out.push(d(a, 'body-tool-not-allowed', 'high', `body cites ${m}, which is not in \`${listKey}\` — the harness will not have it (or will prompt); the feature is dead or degraded`, { precedent: 'C1', line: bodyLine(a, new RegExp(m.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))) }));
     }
     for (const b of mentions.builtin) {
       if (!list.some((t) => t.base === b) && !(a.kind === 'skill' && a.disallowedTools?.some((t) => t.base === b)))
-        out.push(d(a, 'body-tool-not-allowed', 'medium', `body uses \`${b}\` as a tool, which is not in \`${listKey}\``, { precedent: 'C1' }));
+        out.push(d(a, 'body-tool-not-allowed', 'medium', `body uses \`${b}\` as a tool, which is not in \`${listKey}\``, { precedent: 'C1', line: bodyLine(a, new RegExp(`\\b${b}\\b`)) }));
     }
     // unscoped Bash on a read-only role where the harness supports scoping
     if (claimsReadOnly && list.some((t) => (t.base === 'Bash' || t.base === 'PowerShell') && !t.spec) && primary?.toolScopedSyntax)
@@ -146,7 +165,8 @@ export function lintArtifact(a: Artifact, o: LintOptions): Diagnostic[] {
     const grant = o.harnesses.filter((h) => h.toolAllowlist === 'grant');
     const prose = o.harnesses.filter((h) => h.toolAllowlist === 'prose' || h.toolAllowlist === 'dropped');
     if (grant.length && !hasDeny)
-      out.push(d(a, 'readonly-not-enforced', 'high', `on ${grant.map((h) => h.title).join('/')} \`allowed-tools\` only PRE-APPROVES; a read-only promise needs \`disallowed-tools\` (or a settings deny rule) — today it holds on prose alone`, { harness: grant.map((h) => h.id).join(','), precedent: 'grant≠restriction' }));
+      out.push(d(a, 'readonly-not-enforced', 'high', `on ${grant.map((h) => h.title).join('/')} \`allowed-tools\` only PRE-APPROVES; a read-only promise needs \`disallowed-tools\` (or a settings deny rule) — today it holds on prose alone`,
+        { harness: grant.map((h) => h.id).join(','), precedent: 'grant≠restriction', autofix: { op: 'list-add', key: 'disallowed-tools', items: ['Write', 'Edit'], label: 'Add disallowed-tools: Write, Edit', safety: 'review' } }));
     if (prose.length)
       out.push(d(a, 'readonly-not-enforced', 'medium', `on ${prose.map((h) => h.id).join('/')} the tool allowlist is informational — the read-only promise is prose only`, { harness: prose.map((h) => h.id).join(','), precedent: 'S7' }));
   }
@@ -155,30 +175,40 @@ export function lintArtifact(a: Artifact, o: LintOptions): Diagnostic[] {
   if (a.kind === 'skill') {
     const expensiveRole = /(stack-engine|spa-mock|run-stack|docker|bring(?:s)? up the stack)/i.test(JSON.stringify(a.metadata ?? {}) + ' ' + a.description);
     const mutators = [...writers, ...shells.filter((t) => !t.spec)];
+    // only when a person can still start it — otherwise the fix would make it unreachable
+    const userOnly: Autofix | undefined = a.userInvocable ? { op: 'set', key: 'disable-model-invocation', value: true, label: 'Set disable-model-invocation: true', safety: 'review' } : undefined;
     if (a.modelInvocable && (list === null || mutators.length || expensiveRole))
       out.push(d(a, 'model-invocable-writer', 'high',
         `model may invoke this skill on its own (no \`disable-model-invocation: true\`) and it ${list === null ? 'has the full toolset' : mutators.length ? `can mutate (${mutators.map((t) => t.raw).join(', ')})` : 'drives an expensive runtime'}`,
-        { line: a.fm.lines['disable-model-invocation'] ?? a.fm.lines.name, precedent: 'S2' }));
-    const supervised = /\b(supervised|owner (?:must|has to) (?:approve|confirm)|never (?:run )?unattended)\b/i.test(a.body);
-    if (a.modelInvocable && supervised)
-      out.push(d(a, 'supervised-but-auto', 'high', 'body demands supervision but the model may invoke the skill autonomously', { precedent: 'S2' }));
+        { line: a.fm.lines['disable-model-invocation'] ?? a.fm.lines.name, precedent: 'S2', autofix: userOnly }));
+    const SUPERVISED = /\b(supervised|owner (?:must|has to) (?:approve|confirm)|never (?:run )?unattended)\b/i;
+    if (a.modelInvocable && SUPERVISED.test(a.body))
+      out.push(d(a, 'supervised-but-auto', 'high', 'body demands supervision but the model may invoke the skill autonomously', { precedent: 'S2', line: bodyLine(a, SUPERVISED), autofix: userOnly }));
     if (!a.userInvocable && !a.modelInvocable)
-      out.push(d(a, 'unreachable', 'high', '`user-invocable: false` AND `disable-model-invocation: true` — nobody can invoke this skill'));
+      out.push(d(a, 'unreachable', 'high', '`user-invocable: false` AND `disable-model-invocation: true` — nobody can invoke this skill',
+        { line: a.fm.lines['user-invocable'], autofix: { op: 'set', key: 'user-invocable', value: true, label: 'Set user-invocable: true', safety: 'safe' } }));
   }
 
   // ---- dynamic context + Bash ----------------------------------------------------------
   if (DYNAMIC_CONTEXT.test(a.body)) {
     const bare = list === null || list.some((t) => (t.base === 'Bash' || t.base === 'PowerShell') && !t.spec);
-    out.push(d(a, 'dynamic-context', bare ? 'high' : 'medium', 'body contains dynamic context (!`cmd`) — it EXECUTES before the model sees anything; with bare Bash granted this is the malicious-skill pattern (Reversec/Datadog 2026)', { precedent: 'Reversec' }));
+    out.push(d(a, 'dynamic-context', bare ? 'high' : 'medium', 'body contains dynamic context (!`cmd`) — it EXECUTES before the model sees anything; with bare Bash granted this is the malicious-skill pattern (Reversec/Datadog 2026)', { precedent: 'Reversec', line: bodyLine(a, DYNAMIC_CONTEXT) }));
   }
 
   // ---- untrusted external content ----------------------------------------------------
   if (EXTERNAL_INPUT.test(a.body) && !UNTRUSTED_RULE.test(a.body))
-    out.push(d(a, 'untrusted-content-rule', 'medium', 'the artifact pulls external content (tracker/web/attachments/MCP docs) but states no rule that such content is DATA, not instructions', { precedent: 'S5' }));
+    out.push(d(a, 'untrusted-content-rule', 'medium', 'the artifact pulls external content (tracker/web/attachments/MCP docs) but states no rule that such content is DATA, not instructions', { precedent: 'S5', line: bodyLine(a, EXTERNAL_INPUT) }));
 
   // ---- injection heuristics / secrets --------------------------------------------------
-  for (const p of INJECTION) if (p.re.test(a.body)) out.push(d(a, 'injection-heuristic', 'medium', `body contains ${p.what}`, { precedent: 'ToxicSkills' }));
-  for (const p of SECRET) if (p.test(a.body) || p.test(a.fm.data ? JSON.stringify(a.fm.data) : '')) out.push(d(a, 'secret-pattern', 'high', 'a secret-shaped value appears in the artifact', { precedent: 'scan-secrets' }));
+  for (const p of INJECTION) {
+    const m = p.re.exec(a.body);
+    if (!m) continue;
+    const lineText = a.body.slice(a.body.lastIndexOf('\n', m.index) + 1).split('\n')[0].trim();
+    // show the line so the reader can judge it — but never echo invisible control characters
+    const shown = /[\u200B-\u200F\u2060\uFEFF\u202A-\u202E]/.test(lineText) ? '' : `: "${lineText.length > 90 ? lineText.slice(0, 87) + '…' : lineText}"`;
+    out.push(d(a, 'injection-heuristic', 'medium', `body ${p.what}${shown}`, { precedent: 'ToxicSkills', line: bodyLine(a, p.re) }));
+  }
+  for (const p of SECRET) if (p.test(a.body) || p.test(a.fm.data ? JSON.stringify(a.fm.data) : '')) out.push(d(a, 'secret-pattern', 'high', 'a secret-shaped value appears in the artifact', { precedent: 'scan-secrets', line: bodyLine(a, p) }));
 
   // ---- TAUT wiring (generic checks: shape only; the adapter validates against the pack) --
   if (a.kind === 'skill' && a.metadata?.taut && typeof a.metadata.taut === 'object') {
@@ -215,7 +245,12 @@ export function matrix(a: Artifact, harnesses: HarnessCaps[]): { harness: string
 
 // SARIF 2.1.0 — the interchange format CI/IDE tooling reads (same as Cisco skill-scanner).
 export function toSarif(ds: Diagnostic[], version: string, base?: string): unknown {
-  const rules = [...new Set(ds.map((x) => x.code))].map((id) => ({ id, shortDescription: { text: id } }));
+  const rules = [...new Set(ds.map((x) => x.code))].map((id) => {
+    const info = ruleInfo(id);
+    return info
+      ? { id, name: info.title, shortDescription: { text: info.title }, fullDescription: { text: info.why }, help: { text: info.fix }, helpUri: docFor(id) }
+      : { id, shortDescription: { text: id } };
+  });
   const level = (s: string) => (s === 'high' ? 'error' : s === 'medium' ? 'warning' : 'note');
   return {
     $schema: 'https://json.schemastore.org/sarif-2.1.0.json',

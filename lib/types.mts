@@ -15,7 +15,27 @@ export interface Diagnostic {
   line?: number;           // 1-based, when known
   harness?: string;        // set when the finding is harness-specific
   precedent?: string;      // the review finding this rule operationalizes (S1, C1, …)
+  autofix?: Autofix;       // a mechanical frontmatter edit that resolves THIS finding
+  // filled from the rule catalog (rules.mts) at the output boundary:
+  category?: RuleCategory;
+  title?: string;          // short human name of the rule
+  why?: string;            // what goes wrong if it stays
+  fix?: string;            // what to do about it
+  doc?: string;            // where the rule is documented
 }
+
+export type RuleCategory = 'security' | 'privileges' | 'hygiene' | 'syntax' | 'taut' | 'scanner';
+
+// A frontmatter edit, applied to the file text by fix.mts (never by re-emitting the block).
+// `safe`: purely mechanical, behaviour-preserving (a renamed tool, an unreachable skill made
+// reachable). `review`: changes what the artifact may do, or rests on a heuristic that can be
+// wrong about this artifact — applied one at a time after a person reads the diff.
+export type Autofix = { label: string; safety: 'safe' | 'review' } & (
+  | { op: 'set'; key: string; value: boolean | string }
+  | { op: 'list-add'; key: string; items: string[] }
+  | { op: 'list-remove'; key: string; item: string }
+  | { op: 'list-replace'; key: string; item: string; with: string }
+);
 
 // A parsed frontmatter block: the YAML subset SAUT understands (see frontmatter.mts).
 export interface Frontmatter {

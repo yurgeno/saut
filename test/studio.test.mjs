@@ -244,6 +244,50 @@ test('the page tracks unsaved edits on every field and asks before discarding th
   assert.match(html, /<option value="4">L4/, 'L4 is offered');
 });
 
+test('GET /api/artifact explains every finding and anchors the editor', async () => {
+  const j = await (await get('/api/artifact?path=' + encodeURIComponent(path.join(root, 'skills', 'fx-dead', 'SKILL.md')))).json();
+  const dead = j.findings.find((f) => f.code === 'dead-privilege');
+  assert.ok(dead.title && dead.why && dead.fix && dead.doc && dead.category === 'privileges');
+  assert.equal(dead.autofix.op, 'list-remove');
+  assert.equal(dead.autofix.safety, 'review');
+  assert.equal(typeof j.bodyOffset, 'number');
+  assert.equal(j.lines['allowed-tools'], dead.line, 'the line points at the allowlist');
+});
+
+test('POST /api/fix: preview, apply against the previewed text only, and nothing the linter did not propose', async () => {
+  const file = path.join(root, 'skills', 'fx-dead', 'SKILL.md');
+  const orig = await fs.readFile(file, 'utf8');
+  try {
+    const pass = await (await get('/api/artifact?path=' + encodeURIComponent(file))).json();
+    const f = pass.findings.find((x) => x.code === 'dead-privilege' && x.autofix.item === 'WebFetch');
+    const preview = await (await post('/api/fix', { path: file, autofix: f.autofix })).json();
+    assert.equal(preview.ok, true);
+    assert.match(preview.diff, /^- .*WebFetch/m);
+    assert.match(preview.diff, /^\+ .*allowed-tools: \[Read, mcp__docs__lookup, mcp__docs__query\]/m);
+    assert.equal(await fs.readFile(file, 'utf8'), orig, 'a preview writes nothing');
+    // an edit that the linter does not propose is refused, however well-formed
+    const forged = await post('/api/fix', { path: file, autofix: { op: 'set', key: 'allowed-tools', value: 'Bash', label: 'x', safety: 'safe' }, apply: true });
+    assert.equal(forged.status, 400);
+    assert.match((await forged.json()).error, /not proposed/);
+    // a stale preview is refused
+    const stale = await post('/api/fix', { path: file, autofix: f.autofix, base: 'deadbeefdeadbeef', apply: true });
+    assert.equal(stale.status, 400);
+    assert.match((await stale.json()).error, /changed since the preview/);
+    const applied = await (await post('/api/fix', { path: file, autofix: f.autofix, base: preview.base, apply: true })).json();
+    assert.equal(applied.applied, true);
+    assert.doesNotMatch(await fs.readFile(file, 'utf8'), /WebFetch/);
+    assert.ok(!applied.passport.findings.some((x) => x.code === 'dead-privilege' && x.autofix?.item === 'WebFetch'), 'the passport comes back re-linted');
+    const outside = await post('/api/fix', { path: '/etc/hosts', autofix: f.autofix });
+    assert.equal(outside.status, 400);
+  } finally { await fs.writeFile(file, orig); }
+});
+
+test('the page renders explained findings and wires the fix preview', async () => {
+  const html = await (await getNoToken('/')).text();
+  for (const needle of ['function drawFindings', 'How to fix:', 'why it matters', "api('/api/fix'", "$('modalApply').disabled = dirty", 'function goToLine'])
+    assert.ok(html.includes(needle), needle);
+});
+
 test('the token is compared in constant time and finished runs are evicted', async () => {
   // a wrong token of the RIGHT length must not be distinguishable by shape of failure
   const same = await fetch(base + '/api/save', { method: 'POST', headers: { 'content-type': 'application/json', 'x-saut-token': 'f'.repeat(studio.token.length) }, body: '{}' });

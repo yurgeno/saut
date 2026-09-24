@@ -26,6 +26,8 @@ import type { BenchResult } from '../bench/types.mts';
 import { costOf, overBudget } from '../cost.mts';
 import { emitFrontmatter } from '../frontmatter.mts';
 import { lintArtifact, matrix, sortDiags } from '../lint.mts';
+import { explain } from '../rules.mts';
+import { applyFix, lineDiff } from '../fix.mts';
 import type { Artifact, Diagnostic } from '../types.mts';
 import { exists, readText } from '../util.mts';
 import { previews } from '../adapters/taut.mts';
@@ -99,8 +101,8 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
     return {
       kind: a.kind, name: a.name, path: a.path,
       text: await readText(a.path),
-      frontmatter: a.fm.data, duplicates: a.fm.duplicates,
-      findings: sortDiags(findings), cost, over: overBudget(cost, a, {}), matrix: matrix(a, harnesses), compiled,
+      frontmatter: a.fm.data, duplicates: a.fm.duplicates, lines: a.fm.lines, bodyOffset: a.fm.bodyOffset,
+      findings: sortDiags(explain(findings)), cost, over: overBudget(cost, a, {}), matrix: matrix(a, harnesses), compiled,
     };
   }
 
@@ -143,13 +145,37 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
     if (path.basename(file) !== 'SKILL.md' && !file.endsWith('.md')) throw new Error('refusing to write a non-markdown file');
     const created = !(await exists(file));
     const text = emitFrontmatter(fm) + (body.startsWith('\n') ? body : '\n' + body);
+    await writeContained(file, text.endsWith('\n') ? text : text + '\n', created);
+    return { path: file, created };
+  }
+
+  // Callers have checked containment. O_NOFOLLOW on the final component: a symlink planted at
+  // the target must not redirect the write (containment already resolved the directory chain).
+  async function writeContained(file: string, text: string, created: boolean): Promise<void> {
     await fs.mkdir(path.dirname(file), { recursive: true });
-    // O_NOFOLLOW on the final component: a symlink planted at the target must not redirect
-    // the write (the containment check above already resolved the directory chain).
     const flags = created ? 'wx' : fsSync.constants.O_WRONLY | fsSync.constants.O_TRUNC | fsSync.constants.O_NOFOLLOW;
     const h = await fs.open(file, flags as never);
-    try { await h.writeFile(text.endsWith('\n') ? text : text + '\n'); } finally { await h.close(); }
-    return { path: file, created };
+    try { await h.writeFile(text); } finally { await h.close(); }
+  }
+
+  // A mechanical fix, previewed then applied. Only a fix the linter proposes for the file AS
+  // IT IS NOW is accepted — the page cannot smuggle an arbitrary edit through this route —
+  // and the apply step carries the hash of the text the preview was computed from, so a file
+  // edited in between is refused rather than patched blind.
+  async function fix(payload: any) {
+    const file = path.resolve(String(payload.path ?? ''));
+    if (!(await contained(file))) throw new Error('path outside the studio root');
+    const pass = await passport(file);
+    const want = JSON.stringify(payload.autofix ?? null);
+    const finding = pass.findings.find((x) => x.autofix && JSON.stringify(x.autofix) === want);
+    if (!finding?.autofix) throw new Error('that fix is not proposed for this file any more — reload it');
+    const base = crypto.createHash('sha256').update(pass.text).digest('hex').slice(0, 16);
+    const r = applyFix(pass.text, finding.autofix);
+    if (!r.ok) return { ok: false, reason: r.reason, diff: '', base };
+    if (!payload.apply) return { ok: true, diff: lineDiff(pass.text, r.text), base, label: finding.autofix.label };
+    if (payload.base !== base) throw new Error('the file changed since the preview — review the fix again');
+    await writeContained(file, r.text, false);
+    return { ok: true, applied: true, label: finding.autofix.label, passport: await passport(file) };
   }
 
   // Pack validation: the pack's own script is the gate (compile + verify + the SAUT step);
@@ -279,6 +305,7 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
           catch (e) { return send(400, { error: `malformed JSON body: ${(e as Error).message}` }); }
           if (pathname === '/api/emit') return send(200, { text: emitFrontmatter(payload.frontmatter ?? {}) });
           if (pathname === '/api/save') { const r = await save(payload); return send(200, { ...r, passport: await passport(r.path) }); }
+          if (pathname === '/api/fix') return send(200, await fix(payload));
           if (pathname === '/api/test') return send(200, { id: await startBench(payload) });
           if (pathname === '/api/validate') {
             if (busy) return send(409, { error: 'another action is still running' });

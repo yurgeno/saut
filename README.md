@@ -76,6 +76,7 @@ saut lint . --harness claude-code,codex  # judge for a subset of harnesses
 saut lint . --scan                       # + an installed content scanner (rented, not bundled)
 saut lint . --json | --sarif             # CI / IDE
 saut lint . --strict                     # exit 1 on medium findings too
+saut lint . --fix                        # the mechanical fixes as a diff (--write applies the safe ones)
 
 saut cost .                              # estimates (no key, no network)
 saut cost . --exact                      # counted by the Claude token-counting API

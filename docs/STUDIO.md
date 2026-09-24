@@ -27,8 +27,15 @@ or reverting asks before it discards them.
 **Right — three tabs.**
 
 - *Passport*: cost (always-on / on-invoke, with what the artifact drags in transitively), the
-  per-harness enforcement matrix, and every lint finding with its rule id and line. It is
-  computed when the artifact opens and again on save.
+  per-harness enforcement matrix (hover a pill for what `grant`, `prose`… mean), and the
+  findings grouped by category — security, privileges, hygiene and cost, syntax, TAUT wiring.
+  Each finding says what it is, how to fix it and why it matters, links to its rule, and
+  jumps to its line: a frontmatter line focuses the form field, a body line is selected in the
+  body. A finding with a mechanical fix has a button that opens the diff; **Apply and save**
+  writes it and re-lints. The server applies only a fix the linter proposes for the file as it
+  is at that moment, and refuses if the file changed since the preview; with unsaved edits in
+  the form, applying is disabled. The passport is computed when the artifact opens, on save and
+  after a fix.
 - *Compiled* (TAUT packs): the exact bytes the installer would write on each harness, with that
   adapter's degradations — the compiler in the authoring loop.
 - *Bench*: pick the level (L1–L4), runs, cost ceiling and harnesses, press Run, and the events

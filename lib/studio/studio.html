@@ -60,6 +60,27 @@
            border-radius: 8px; padding: 9px 13px; font-size: 12px; display: none; max-width: 460px; }
   .split { display: grid; grid-template-columns: 1fr; gap: 10px; }
   details summary { cursor: pointer; color: var(--muted); font-size: 11.5px; }
+  .group h3 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em;
+              color: var(--muted); margin: 14px 0 2px; }
+  .find .title { font-weight: 600; }
+  .find .loc { color: var(--accent); cursor: pointer; font-size: 11px; background: none; border: none; padding: 0; font-family: inherit; }
+  .find .loc:hover { text-decoration: underline; }
+  .find .how { margin-top: 4px; font-size: 11.5px; }
+  .find .how b { color: var(--muted); font-weight: 500; }
+  .find details { margin-top: 3px; } .find details div { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+  .find .actions { margin-top: 6px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .find .actions a { font-size: 11px; color: var(--muted); }
+  code { font-family: ui-monospace, Menlo, monospace; font-size: 11px; background: var(--panel2); padding: 0 3px; border-radius: 3px; }
+  .btn.small { height: 24px; padding: 0 9px; font-size: 11.5px; }
+  .summary { margin: 8px 0 0; font-size: 11.5px; color: var(--muted); }
+  .flash { animation: flash 1.4s ease-out; }
+  @keyframes flash { from { box-shadow: 0 0 0 2px var(--accent); } to { box-shadow: 0 0 0 0 transparent; } }
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none; align-items: center; justify-content: center; z-index: 10; }
+  .modal-box { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px;
+               width: min(860px, calc(100vw - 32px)); max-height: calc(100vh - 64px); overflow: auto; }
+  .modal-box h2 { font-size: 14px; margin: 0 0 6px; }
+  pre.diff { max-height: 50vh; white-space: pre-wrap; word-break: break-word; } pre.diff .add { color: var(--ok); } pre.diff .del { color: var(--bad); }
+  pre.diff mark { color: inherit; background: rgba(224,96,96,.28); border-radius: 2px; } pre.diff .add mark { background: rgba(63,176,118,.28); }
 </style>
 </head><body>
 <div class="wrap">
@@ -178,6 +199,17 @@
   </div>
 </div>
 <div id="toast"></div>
+<div id="modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+  <div class="modal-box">
+    <h2 id="modalTitle"></h2>
+    <div id="modalNote" class="muted" style="font-size:12px"></div>
+    <pre id="modalDiff" class="diff"></pre>
+    <div class="row" style="margin-top:10px">
+      <button class="btn primary" id="modalApply">Apply and save</button>
+      <button class="btn" id="modalCancel">Cancel</button>
+    </div>
+  </div>
+</div>
 
 <script>
 const TOKEN = '%%TOKEN%%';
@@ -301,17 +333,140 @@ function counts() {
   $('bodyCount').textContent = '— ' + $('body').value.length + ' chars, on invoke';
 }
 
+const ALLOWLIST_MEANS = {
+  restrict: 'the allowlist restricts: tools outside it are unavailable',
+  grant: 'the allowlist only pre-approves; every other tool is still available',
+  prose: 'the allowlist is text for the model; nothing enforces it',
+  dropped: 'the allowlist is removed when the artifact is installed',
+  'n/a': 'the harness has no allowlist for this kind of artifact',
+};
 function drawPassport(p) {
   const tr = p.cost.transitive || [];
   const inv = p.cost.invokeTokens + tr.reduce((s, t) => s + t.tokens, 0);
   $('cost').innerHTML = '<table><tr><th>always-on</th><th>on-invoke</th><th>method</th></tr>' +
     '<tr><td>' + p.cost.alwaysOnTokens + ' tok</td><td>' + inv + ' tok' + (tr.length ? ' <span class="muted">(incl. ' + tr.map((t) => esc(t.name)).join(', ') + ')</span>' : '') + '</td><td class="muted">' + p.cost.method + '</td></tr></table>';
   $('matrix').innerHTML = '<div style="margin:9px 0">' + p.matrix.map((m) =>
-    '<span class="pill ' + (m.allowlist === 'restrict' ? 'ok' : m.allowlist === 'grant' ? 'warn' : 'bad') + '">' + esc(m.harness) + ' = ' + esc(m.allowlist) + '</span>').join('') + '</div>';
-  $('findings').innerHTML = p.findings.length ? p.findings.map((f) =>
-    '<div class="find ' + esc(f.severity) + '"><span class="code">' + esc(f.code) + (f.harness ? ' [' + esc(f.harness) + ']' : '') + (f.line ? ':' + f.line : '') + '</span><br>' + esc(f.message) + '</div>').join('')
-    : '<div class="ok">no findings</div>';
+    '<span class="pill ' + (m.allowlist === 'restrict' ? 'ok' : m.allowlist === 'grant' ? 'warn' : 'bad') + '" title="' + esc(ALLOWLIST_MEANS[m.allowlist] || '') + '">' + esc(m.harness) + ' = ' + esc(m.allowlist) + '</span>').join('') + '</div>';
+  drawFindings(p);
 }
+
+// ── findings: grouped, each with why / how to fix / a previewable mechanical fix ──
+const CATEGORIES = [['security', 'Security'], ['privileges', 'Privileges'], ['hygiene', 'Hygiene and cost'],
+  ['syntax', 'Syntax'], ['taut', 'TAUT wiring'], ['scanner', 'Content scanner'], ['other', 'Other']];
+// inline `code` in rule text → <code>; everything else escaped
+const md = (t) => esc(t).replace(/`([^`]+)`/g, '<code>$1</code>');
+
+function drawFindings(p) {
+  const fs = p.findings;
+  if (!fs.length) { $('findings').innerHTML = '<div class="ok" style="margin-top:8px">no findings</div>'; return; }
+  const hi = fs.filter((f) => f.severity === 'high').length;
+  const fixable = fs.filter((f) => f.autofix).length;
+  let html = '<div class="summary">' + fs.length + ' finding' + (fs.length === 1 ? '' : 's') + ' · ' + hi + ' high · ' + fixable + ' with a fix</div>';
+  for (const [cat, label] of CATEGORIES) {
+    const items = fs.map((f, i) => [f, i]).filter(([f]) => (f.category || 'other') === cat);
+    if (!items.length) continue;
+    html += '<div class="group"><h3>' + label + ' · ' + items.length + '</h3>' + items.map(([f, i]) => findingCard(f, i)).join('') + '</div>';
+  }
+  $('findings').innerHTML = html;
+  for (const b of $('findings').querySelectorAll('.loc')) b.onclick = () => goToLine(+b.dataset.line);
+  for (const b of $('findings').querySelectorAll('.fixbtn')) b.onclick = () => previewFix(fs[+b.dataset.i]);
+}
+
+function findingCard(f, i) {
+  const where = f.line ? ' <button class="loc" data-line="' + f.line + '" title="show in the editor">line ' + f.line + '</button>' : '';
+  const safety = f.autofix ? (f.autofix.safety === 'review'
+    ? '<span class="pill warn" title="changes what the artifact may do, or rests on a heuristic — read the diff">review</span>'
+    : '<span class="pill ok" title="mechanical, behaviour-preserving">safe</span>') : '';
+  return '<div class="find ' + esc(f.severity) + '">' +
+    '<div><span class="title">' + esc(f.title || f.code) + '</span> <span class="code">' + esc(f.code) + (f.harness ? ' [' + esc(f.harness) + ']' : '') + '</span>' + where + '</div>' +
+    '<div>' + md(f.message) + '</div>' +
+    (f.fix ? '<div class="how"><b>How to fix:</b> ' + md(f.fix) + '</div>' : '') +
+    (f.why ? '<details><summary>why it matters</summary><div>' + md(f.why) + '</div></details>' : '') +
+    '<div class="actions">' +
+      (f.autofix ? '<button class="btn small fixbtn" data-i="' + i + '">' + esc(f.autofix.label) + '</button>' + safety : '') +
+      (f.doc ? '<a href="' + esc(f.doc) + '" target="_blank" rel="noopener noreferrer">rule ↗</a>' : '') +
+    '</div></div>';
+}
+
+// A finding's line → the form field it belongs to (frontmatter) or the body line itself.
+const FIELD_FOR = { name: 'f_name', description: 'f_desc', 'argument-hint': 'f_hint', 'allowed-tools': 'toolPills', tools: 'toolPills',
+  'disallowed-tools': 'toolPills', 'disable-model-invocation': 'f_noModel', 'user-invocable': 'f_userInv', model: 'f_model',
+  effort: 'f_effort', metadata: 'tautBlock' };
+function flash(el) { el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); }
+function goToLine(line) {
+  if (!current || !current.bodyOffset) return;
+  if (line < current.bodyOffset) {
+    const key = Object.entries(current.lines || {}).filter(([, n]) => n <= line).sort((a, b) => b[1] - a[1])[0]?.[0];
+    const el = $(FIELD_FOR[key] || 'f_name');
+    if (!el || el.offsetParent === null) return toast('line ' + line + ' is in the frontmatter (' + (key || '?') + ')');
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    if (el.focus) el.focus({ preventScroll: true });
+    flash(el.closest('.row') && el.type === 'checkbox' ? el.closest('label') : el);
+    return;
+  }
+  const ta = $('body');
+  const idx = line - current.bodyOffset;
+  const ls = ta.value.split('\n');
+  if (idx >= ls.length) return;
+  const start = ls.slice(0, idx).reduce((n, l) => n + l.length + 1, 0);
+  ta.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  ta.focus({ preventScroll: true });
+  ta.setSelectionRange(start, start + ls[idx].length);
+  const lh = parseFloat(getComputedStyle(ta).lineHeight) || 18;
+  ta.scrollTop = Math.max(0, idx * lh - ta.clientHeight / 3);
+  flash(ta);
+}
+
+// ── fix: preview the diff, then apply (the server re-checks the fix is still proposed) ──
+let pendingFix = null;
+// A removed line followed by its replacement: mark the part that changed, so a one-word edit
+// in a long allowlist line is visible without reading both lines character by character.
+function diffHtml(d) {
+  const ls = d.split('\n');
+  const out = ls.map((l) => ({ cls: l.startsWith('+') ? 'add' : l.startsWith('-') ? 'del' : 'muted', html: esc(l) }));
+  for (let i = 0; i + 1 < ls.length; i++) {
+    if (!ls[i].startsWith('-') || !ls[i + 1].startsWith('+')) continue;
+    const gut = (l) => (l.match(/^[-+] *\d+ {2}/) || [''])[0].length;   // the "- NNN  " gutter
+    const ga = gut(ls[i]), gb = gut(ls[i + 1]);
+    const a = ls[i].slice(ga), b = ls[i + 1].slice(gb);
+    let p = 0; while (p < a.length && p < b.length && a[p] === b[p]) p++;
+    let q = 0; while (q < a.length - p && q < b.length - p && a[a.length - 1 - q] === b[b.length - 1 - q]) q++;
+    const mark = (line, g, s) => esc(line.slice(0, g + p)) + '<mark>' + esc(s.slice(p, s.length - q)) + '</mark>' + esc(s.slice(s.length - q));
+    out[i].html = mark(ls[i], ga, a); out[i + 1].html = mark(ls[i + 1], gb, b);
+  }
+  return out.map((o) => '<span class="' + o.cls + '">' + o.html + '</span>').join('\n');
+}
+function closeModal() { $('modal').style.display = 'none'; pendingFix = null; }
+async function previewFix(f) {
+  if (!current || !current.path || !f.autofix) return;
+  try {
+    const r = await api('/api/fix', { path: current.path, autofix: f.autofix });
+    if (!r.ok) return toast('cannot apply: ' + r.reason, true);
+    pendingFix = { autofix: f.autofix, base: r.base };
+    $('modalTitle').textContent = f.autofix.label;
+    $('modalNote').innerHTML = (f.autofix.safety === 'review'
+      ? '<span class="warn">Review.</span> This changes what the artifact may do, or rests on a heuristic that can be wrong for this artifact — check the body before applying. '
+      : 'A mechanical, behaviour-preserving change. ') +
+      (dirty ? '<span class="bad">You have unsaved edits — save or revert them first.</span>' : 'Applying writes the file and re-lints it.');
+    $('modalDiff').innerHTML = diffHtml(r.diff);
+    $('modalApply').disabled = dirty;
+    $('modal').style.display = 'flex';
+    $('modalApply').focus();
+  } catch (e) { toast(e.message, true); }
+}
+$('modalCancel').onclick = closeModal;
+$('modal').onclick = (e) => { if (e.target === $('modal')) closeModal(); };
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('modal').style.display === 'flex') closeModal(); });
+$('modalApply').onclick = async () => {
+  if (!pendingFix || !current) return;
+  const fix = pendingFix;
+  try {
+    const r = await api('/api/fix', { path: current.path, autofix: fix.autofix, base: fix.base, apply: true });
+    closeModal();
+    await openArtifact(current.path);     // the form and the passport come back from disk
+    toast('applied: ' + r.label);
+  } catch (e) { toast(e.message, true); }
+};
 
 function drawCompiled(p) {
   if (!p.compiled || !p.compiled.length) { $('compiledList').innerHTML = '<div class="muted">compile previews need a TAUT pack and engine</div>'; return; }

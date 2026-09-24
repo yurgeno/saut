@@ -31,12 +31,12 @@ const { VERSION, cmdCost, cmdHarnesses, cmdLint, cmdPassport, cmdPreview, cmdStu
 // Flags are declared, not hand-rolled per branch: a missing value, a non-numeric value or a
 // number out of range is a USAGE error (exit 2) with a message naming the flag — never an
 // undefined that turns into NaN and silently changes behaviour three modules later.
-const BOOL_FLAGS = new Set(['--json', '--sarif', '--live', '--exact', '--strict', '--no-taut', '--scan', '--keep']);
+const BOOL_FLAGS = new Set(['--json', '--sarif', '--live', '--exact', '--strict', '--no-taut', '--scan', '--keep', '--fix', '--write']);
 const VALUE_FLAGS = {
   '--catalog': 'catalog', '--budget': 'budget', '--taut': 'taut', '--deployment': 'deployment',
   '--scanner': 'scanner', '--workspace': 'workspace', '--since': 'since', '--until': 'until',
   '--model': 'model', '--judge-model': 'judgeModel', '--landscape': 'landscape', '--case': 'case',
-  '--out': 'out',
+  '--out': 'out', '--only': 'only',
 };
 const NUMBER_FLAGS = {
   '--level': { key: 'level', min: 1, max: 4, int: true },
@@ -47,7 +47,7 @@ const NUMBER_FLAGS = {
 };
 const BOOL_KEY = {
   '--json': 'json', '--sarif': 'sarif', '--live': 'live', '--exact': 'exact', '--strict': 'strict',
-  '--no-taut': 'noTaut', '--scan': 'scan', '--keep': 'keep',
+  '--no-taut': 'noTaut', '--scan': 'scan', '--keep': 'keep', '--fix': 'fix', '--write': 'write',
 };
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -121,6 +121,9 @@ Options
   --json | --sarif     machine output (sarif: lint only)
   -h, --help · -V, --version
   --strict             lint exits 1 on medium findings too (default: high only)
+  --fix [--write]      lint: show the mechanical fixes as a diff; --write applies the SAFE ones and
+  --only <codes>       re-lints; fixes marked review (they change behaviour or rest on a heuristic)
+                       are written only for the rule codes listed in --only
 
 TAUT packs (auto-detected: pack.json + skills/ or <project>/deployment.json)
   --taut <dir>         the TAUT engine to import (default: $SAUT_TAUT_ENGINE, ~/taut)
@@ -131,11 +134,11 @@ TAUT packs (auto-detected: pack.json + skills/ or <project>/deployment.json)
 
 Bench (saut test)
   --level 1|2|3|4      cumulative (default 3; 4 = scenario graders) · --runs <n> (default 1) · --case <glob>
-  --model <id>         harness model (default cheap: claude haiku, codex gpt-5.4-mini)
+  --model <id>         harness model (default cheap: claude haiku, codex gpt-6-luna)
   --judge-model <id>   model for L4 llm/baseline graders (default haiku)
   --max-cost <usd>     stop when Claude-reported spend reaches this ceiling
   --landscape <dir>    TAUT: a real landscape, COPIED into the scratch (default: stub repos)
-  --out <dir>          results (default <artifact>/evals/results/<timestamp>/) · --keep scratch
+  --out <dir>          results (default $SAUT_HOME/results/<name>--<hash>/<timestamp>/, SAUT_HOME=~/.saut) · --keep scratch
   --timeout <s>        per run (default 300)
 
 Studio

@@ -5,6 +5,20 @@ versions are [semantic](https://semver.org/) and each release is tagged.
 
 ## [Unreleased]
 
+### Added
+
+- **Every finding says how to fix it.** A rule catalog gives each code a title, why it matters
+  and what to do; the CLI prints the advice under the finding, `--json` and the Studio carry
+  it, SARIF fills the rule's `fullDescription`, `help` and `helpUri`. Findings about the body
+  point at their line, and `injection-heuristic` quotes the line it matched.
+- **Mechanical fixes.** Findings that can be fixed by a frontmatter edit carry an `autofix`,
+  applied line by line so comments, key order and capability-marker branches survive.
+  `saut lint --fix` previews them as a diff; `--write` applies the `safe` ones; `review` ones
+  (they change behaviour or rest on a heuristic) are written only for the codes in `--only`.
+- **Studio: findings you can act on.** Grouped by category, each with how to fix, why, a link
+  to the rule, a jump to its line, and — where there is one — a fix button that previews the
+  diff (with the changed part highlighted) before **Apply and save**.
+
 ### Changed
 
 - **Bench results live outside the project.** `saut test` and the Studio write runs to
@@ -23,6 +37,7 @@ versions are [semantic](https://semver.org/) and each release is tagged.
 - **Studio offered no L4.** The bench level list stopped at L3 although the server ran L4; the
   scenario column now shows in the result matrix.
 - The docs said the passport updates as you type; it updates on open and on save.
+- `saut --help` named the old results directory and the retired `gpt-5.4-mini` bench default.
 
 ## [0.6.4] — 2026-09-23
 

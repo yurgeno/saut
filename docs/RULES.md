@@ -72,8 +72,37 @@ and SARIF both parsed). Nothing is bundled or downloaded: with no scanner instal
 says so plainly and SAUT's own rules still run. What SAUT owns is the part no scanner
 produces — the per-harness privilege semantics.
 
+## Advice and fixes
+
+Every finding carries the rule's **title**, **why** it matters and **how to fix** it, from one
+catalog (`lib/rules.mts`) — the CLI prints the advice under the finding, `--json` and the
+Studio carry the fields, SARIF puts them in the rule's `fullDescription` / `help` / `helpUri`.
+A finding about the body points at its line.
+
+Some findings also carry an **autofix**: a frontmatter edit applied to the file text line by
+line, so comments, key order, quoting and capability-marker branches survive. A fix that
+cannot be applied safely (a quoted or folded value, a list it would empty) is refused, never
+half-applied. Each fix is classed:
+
+| class | meaning | rules |
+|---|---|---|
+| `safe` | mechanical, behaviour-preserving | `legacy-tool` (rename), `unreachable` (`user-invocable: true`) |
+| `review` | changes what the artifact may do, or rests on a heuristic that can be wrong for this artifact | `dead-privilege` (remove the tool), `model-invocable-writer` / `supervised-but-auto` (`disable-model-invocation: true`), `readonly-not-enforced` on Claude Code (`disallowed-tools: Write, Edit`) |
+
+```bash
+saut lint <path> --fix                            # preview every fix as a diff; writes nothing
+saut lint <path> --fix --write                    # apply the safe ones, re-lint
+saut lint <path> --fix --write --only dead-privilege,model-invocable-writer   # + these review ones
+```
+
+A `review` fix deserves the diff: `dead-privilege`, for one, reads the body for mentions of the
+tool, and a skill that calls "every allowed MCP server" without naming the tools is flagged
+although it uses them. In the Studio each fix is previewed and applied one at a time.
+
 ## Output
 
-`--json` prints `{version, artifacts[], diagnostics[]}`; `--sarif` prints SARIF 2.1.0 with
-one rule per code (high → error, medium → warning, low/info → note). Exit code 1 on any high
-finding, or on medium under `--strict`.
+`--json` prints `{version, artifacts[], diagnostics[]}` (each diagnostic with `category`,
+`title`, `why`, `fix`, `doc` and, when there is one, `autofix`); `--fix --json` prints the
+per-file fixes, diffs and what was written. `--sarif` prints SARIF 2.1.0 with one rule per code
+(high → error, medium → warning, low/info → note). Exit code 1 on any high finding, or on
+medium under `--strict`.
