@@ -17,7 +17,8 @@ versions are [semantic](https://semver.org/) and each release is tagged.
   (they change behaviour or rest on a heuristic) are written only for the codes in `--only`.
 - **Studio: findings you can act on.** Grouped by category, each with how to fix, why, a link
   to the rule, a jump to its line, and — where there is one — a fix button that previews the
-  diff (with the changed part highlighted) before **Apply and save**.
+  diff (with the changed part highlighted) before **Apply and save**. A finding without one
+  says so and links the line to edit; rules that read prose or patterns are marked heuristic.
 
 ### Changed
 
@@ -38,6 +39,7 @@ versions are [semantic](https://semver.org/) and each release is tagged.
   scenario column now shows in the result matrix.
 - The docs said the passport updates as you type; it updates on open and on save.
 - `saut --help` named the old results directory and the retired `gpt-5.4-mini` bench default.
+- `injection-heuristic` flagged prose as a credential read when `echo` and `.env` merely shared a line ("never echo credentials … fill `.taut/local.env`"); the file must now be the command's argument.
 
 ## [0.6.4] — 2026-09-23
 

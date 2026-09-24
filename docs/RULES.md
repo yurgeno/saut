@@ -95,6 +95,11 @@ saut lint <path> --fix --write                    # apply the safe ones, re-lint
 saut lint <path> --fix --write --only dead-privilege,model-invocable-writer   # + these review ones
 ```
 
+A finding without an autofix needs a hand edit; the Studio says so and links the line. Rules
+that read prose or patterns (`dead-privilege`, `injection-heuristic`, `untrusted-content-rule`,
+the read-only claims, `supervised-but-auto`, `agent-writes-via-bash`, builtin
+`body-tool-not-allowed`) are marked `heuristic` — they can be wrong about a given artifact.
+
 A `review` fix deserves the diff: `dead-privilege`, for one, reads the body for mentions of the
 tool, and a skill that calls "every allowed MCP server" without naming the tools is flagged
 although it uses them. In the Studio each fix is previewed and applied one at a time.

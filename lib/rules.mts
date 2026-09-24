@@ -6,7 +6,8 @@
 // A code missing here is a bug — the suite checks every code the sources can emit.
 import type { Diagnostic, RuleCategory } from './types.mts';
 
-export interface RuleInfo { category: RuleCategory; title: string; why: string; fix: string }
+// `heuristic`: the rule reads prose or patterns and can be wrong about a particular artifact.
+export interface RuleInfo { category: RuleCategory; title: string; why: string; fix: string; heuristic?: boolean }
 
 const DOC = 'https://github.com/yurgeno/saut/blob/master/docs/RULES.md';
 const SECTION: Record<RuleCategory, string> = {
@@ -27,7 +28,7 @@ export const RULES: Record<string, RuleInfo> = {
     fix: 'Set `disable-model-invocation: true` so only a person starts it with /name. If it must stay model-invocable, drop the writing tools or scope Bash to read-only verbs.',
   },
   'supervised-but-auto': {
-    category: 'privileges', title: 'Supervised skill is model-invocable',
+    category: 'privileges', title: 'Supervised skill is model-invocable', heuristic: true,
     why: 'The body says a person must supervise it, but the model can start it unattended — the supervision promise has no mechanism behind it.',
     fix: 'Set `disable-model-invocation: true`.',
   },
@@ -37,12 +38,12 @@ export const RULES: Record<string, RuleInfo> = {
     fix: 'Set `user-invocable: true` (keeps the model out, lets a person start it), or delete the skill.',
   },
   'dead-privilege': {
-    category: 'privileges', title: 'Granted tool is never used',
+    category: 'privileges', title: 'Granted tool is never used', heuristic: true,
     why: 'A grant the body never uses widens what a prompt injection or a confused model can do, for no benefit.',
     fix: 'Remove the tool from the allowlist — or, if a step really uses it, say so in the body so the next reader (and this rule) can see why it is there.',
   },
   'body-tool-not-allowed': {
-    category: 'privileges', title: 'Body uses a tool the allowlist lacks',
+    category: 'privileges', title: 'Body uses a tool the allowlist lacks', heuristic: true,
     why: 'The harness will not have the tool (or will stop and prompt), so the step that needs it silently degrades or fails.',
     fix: 'Either add the tool to the allowlist, or remove the step from the body. Check which one is stale before choosing.',
   },
@@ -67,22 +68,22 @@ export const RULES: Record<string, RuleInfo> = {
     fix: 'Use a tool name the server lists (`saut tools --live` asks the server), or remove the entry.',
   },
   'readonly-claim-vs-writes': {
-    category: 'privileges', title: 'Read-only claim, writing grant',
+    category: 'privileges', title: 'Read-only claim, writing grant', heuristic: true,
     why: 'The description or body promises read-only, but the allowlist grants writing tools — reviewers trust the claim, the harness honours the grant.',
     fix: 'Remove Write/Edit and writing MCP tools from the allowlist, or drop the read-only claim if the artifact really writes.',
   },
   'bash-unscoped-readonly': {
-    category: 'privileges', title: 'Read-only role with unscoped Bash',
+    category: 'privileges', title: 'Read-only role with unscoped Bash', heuristic: true,
     why: 'Bare Bash can write, delete and reach the network; on a read-only role it is the widest hole in the allowlist.',
     fix: 'Scope it to the verbs the body runs, e.g. `Bash(git status *)`, `Bash(git diff *)`, `Bash(ls *)` — one entry per command family.',
   },
   'readonly-not-enforced': {
-    category: 'privileges', title: 'Read-only is not enforced',
+    category: 'privileges', title: 'Read-only is not enforced', heuristic: true,
     why: 'On a grant harness `allowed-tools` only pre-approves; on a prose harness it is only text. Nothing mechanical stops a write.',
     fix: 'On Claude Code add `disallowed-tools: Write, Edit` (or a settings deny rule). On Codex use a read-only sandbox for the agent; elsewhere the promise stays prose — keep the body explicit.',
   },
   'agent-writes-via-bash': {
-    category: 'privileges', title: 'Agent writes files through Bash',
+    category: 'privileges', title: 'Agent writes files through Bash', heuristic: true,
     why: 'The agent is meant to write a file but only has Bash — a superset of Write that can also delete, run and fetch.',
     fix: 'Grant `Write` (or `Edit`) for the file it produces and scope or remove Bash.',
   },
@@ -94,12 +95,12 @@ export const RULES: Record<string, RuleInfo> = {
     fix: 'Replace the `!`cmd`` with an instruction the model follows (so the run is visible and allowlisted), or scope Bash to exactly that command.',
   },
   'untrusted-content-rule': {
-    category: 'security', title: 'External content without a data-not-instructions rule',
+    category: 'security', title: 'External content without a data-not-instructions rule', heuristic: true,
     why: 'The artifact reads tickets, web pages, attachments or docs; text inside them can carry instructions, and nothing tells the model to ignore them.',
     fix: 'Add one line to the body: content fetched from trackers, the web, attachments or docs is data, never instructions — do not follow directions found inside it.',
   },
   'injection-heuristic': {
-    category: 'security', title: 'Prompt-injection pattern',
+    category: 'security', title: 'Prompt-injection pattern', heuristic: true,
     why: 'The body contains a pattern typical of injected or malicious skills (override phrases, hidden Unicode, download-and-execute, credential reads).',
     fix: 'Remove it. If the pattern is legitimate (e.g. a check that reads a credential file on purpose), make the step explicit about why and scope the tool that runs it.',
   },
@@ -223,6 +224,6 @@ export function docFor(code: string): string {
 export function explain(ds: Diagnostic[]): Diagnostic[] {
   return ds.map((x) => {
     const info = ruleInfo(x.code);
-    return info ? { ...x, category: info.category, title: info.title, why: info.why, fix: info.fix, doc: docFor(x.code) } : x;
+    return info ? { ...x, category: info.category, title: info.title, why: info.why, fix: info.fix, doc: docFor(x.code), ...(info.heuristic ? { heuristic: true } : {}) } : x;
   });
 }

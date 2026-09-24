@@ -32,7 +32,9 @@ const INJECTION = [
   { re: /ignore (?:all |any )?(?:previous|prior|above) instructions/i, what: 'contains an "ignore previous instructions" phrase' },
   { re: /[​-‏⁠﻿‪-‮]/, what: 'contains invisible/bidi Unicode control characters' },
   { re: /\b(curl|wget)\b[^\n]*\|\s*(sh|bash|zsh|node|python)\b/i, what: 'contains a download-and-execute pipeline' },
-  { re: /\b(?:cat|echo|printf)\b[^\n]*(?:\.env|id_rsa|\.aws\/credentials|\.netrc)/i, what: 'reads a credential file' },
+  // the credential file must be the command's ARGUMENT — "never echo credentials; fill
+  // `.taut/local.env`" is a prohibition in prose, not a read
+  { re: /\b(?:cat|less|more|head|tail|echo|printf|base64)\s+(?:-\w+\s+)*["'`]?[\w$~./-]*(?:\.env\b|id_rsa|\.aws\/credentials|\.netrc)/i, what: 'reads a credential file' },
 ];
 const SECRET = [
   /\b(sk-ant-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{32,}|ghp_[A-Za-z0-9]{36}|glpat-[A-Za-z0-9_-]{20}|xox[baprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16})\b/,

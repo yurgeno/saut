@@ -100,3 +100,20 @@ test('description-over-spec: a skill description over 1024 characters is high; 1
   assert.ok(!diagnostics.some((x) => x.path.endsWith('at-spec/SKILL.md') && x.code === 'description-over-spec'));
   await fs.rm(root, { recursive: true, force: true });
 });
+
+test('injection-heuristic: a credential read is a command with the file as its argument, not prose that mentions both', async () => {
+  const { lintArtifact } = await import('../lib/lint.mts');
+  const { loadHarnesses } = await import('../lib/caps.mts');
+  const harnesses = [...(await loadHarnesses()).values()];
+  const registry = { builtin: {}, servers: [] };
+  const art = (body) => ({ kind: 'skill', name: 'x', path: '/x/SKILL.md', dir: '/x', description: 'd', body, allowedTools: [], disallowedTools: null,
+    modelInvocable: false, userInvocable: true, model: null, effort: null, metadata: null, fm: { data: {}, all: {}, diagnostics: [], lines: {}, duplicates: [], bodyOffset: 5 } });
+  const hits = (body) => lintArtifact(art(body), { harnesses, registry }).filter((d) => d.code === 'injection-heuristic' && /credential/.test(d.message));
+  for (const read of ['Run `cat .env` first.', 'cat ~/.aws/credentials', 'then `cat .taut/local.env`', 'echo "$(cat ~/.ssh/id_rsa)"', 'base64 ~/.netrc'])
+    assert.equal(hits(read).length, 1, read);
+  for (const prose of ['(tracker access law); never echo credentials. If the call fails, fill `.taut/local.env`', 'Do not cat anything; the token lives in .env'])
+    assert.equal(hits(prose).length, 0, prose);
+  const [h] = hits('line one\nRun `cat .env` first.');
+  assert.equal(h.line, 6, 'points at the body line');
+  assert.match(h.message, /"Run `cat \.env` first\."/, 'quotes the line');
+});

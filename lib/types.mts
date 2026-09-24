@@ -22,6 +22,7 @@ export interface Diagnostic {
   why?: string;            // what goes wrong if it stays
   fix?: string;            // what to do about it
   doc?: string;            // where the rule is documented
+  heuristic?: boolean;     // the rule reads prose/patterns and can be wrong for this artifact
 }
 
 export type RuleCategory = 'security' | 'privileges' | 'hygiene' | 'syntax' | 'taut' | 'scanner';
