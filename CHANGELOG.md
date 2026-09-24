@@ -7,6 +7,16 @@ versions are [semantic](https://semver.org/) and each release is tagged.
 
 ### Added
 
+- **Studio, rebuilt as a workbench.** Four views: **Overview** (every skill and agent with its
+  high/medium/security counts, guidance A·B·D, fixable findings and token cost, sortable and
+  filterable), **Skill** (a form and the raw file in CodeMirror editors, findings re-linted on
+  the unsaved text as you type, finding lines tinted in the editor, a sticky save bar),
+  **Bench** and **Harnesses** (the registry as reference: allowlist semantics, model catalogs,
+  degradations). Target harnesses in the header filter the matrix, the findings and the bench.
+- **A compiled workspace opens read-only.** Files sealed by `taut.lock` name the pack source
+  and commit they were compiled from and refuse saves and fixes; the copies of one skill for
+  different harnesses collapse into one Overview row.
+
 - **Current vendor guidance, dated and sourced.** Model catalogs per harness (Claude Code:
   aliases, ids, effort levels per model; Codex: the same, plus the harness's own catalog on the
   machine, read first) and the current prompting guidance are data with a verification date
@@ -34,6 +44,9 @@ versions are [semantic](https://semver.org/) and each release is tagged.
 
 ### Changed
 
+- **Studio security contour:** the session token rides in a `<meta>`; the page runs no inline
+  script (`script-src 'self'`); assets are served by name only; paths cross the API relative
+  to the root.
 - **Bench results live outside the project.** `saut test` and the Studio write runs to
   `~/.saut/results/<name>--<hash>/<timestamp>/` (`$SAUT_HOME` moves the root; `--out` still
   writes one run anywhere). Traces carry full model transcripts, and a compiled workspace's
@@ -43,6 +56,15 @@ versions are [semantic](https://semver.org/) and each release is tagged.
 
 ### Fixed
 
+- **Saving from the Studio form dropped what the form does not show** — `disallowed-tools`,
+  `hooks`, `paths`, `license`, comments and TAUT capability-marker branches: the frontmatter
+  was re-emitted from the form's fields. An existing file is now saved as text: the form's
+  edit is applied field by field (`lib/compose.mts`), a field that differs by branch is refused
+  rather than flattened, every save shows the diff, and the write is checked against the hash
+  the file was opened with.
+- **Line numbers in a TAUT pack pointed at the engine-gated text,** not the file: after a
+  capability marker every finding line was off by the lines the marker pass removed. Findings
+  are now mapped back to file lines.
 - **Piped output was cut at 64 KB.** The CLI exited right after writing, before a pipe had
   taken the rest, so `saut lint --json | jq` or `--sarif` into an upload step got a truncated
   document on any tree with more than a screenful of findings. Exit now waits for stdout and

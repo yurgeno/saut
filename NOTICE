@@ -18,3 +18,10 @@ This NOTICE file is provided pursuant to the Apache License, Version 2.0
 form, with or without modification, must retain readable copies of the
 attribution notices contained in this file, in accordance with
 Section 4(d) of the License.
+
+Third-party software bundled with SAUT:
+
+  CodeMirror 6 (codemirror, @codemirror/*, @lezer/*), MIT License,
+  Copyright (C) 2018-2021 by Marijn Haverbeke <marijn@haverbeke.berlin> and others.
+  Bundled into lib/studio/vendor/codemirror.js; the license text is in
+  lib/studio/vendor/LICENSE-codemirror.txt.

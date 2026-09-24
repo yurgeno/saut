@@ -137,8 +137,8 @@ export function catalogServers(ctx: TautContext): ToolCatalogServer[] {
 // Re-read a skill or agent through the ENGINE parser under the all-on gate view. The
 // generic parse stays as fallback when the engine refuses the source (that refusal is
 // itself a finding: the pack will not compile).
-export async function refine(a: Artifact, ctx: TautContext): Promise<{ artifact: Artifact; findings: Diagnostic[] }> {
-  const raw = await readText(a.path);
+export async function refine(a: Artifact, ctx: TautContext, text?: string): Promise<{ artifact: Artifact; findings: Diagnostic[] }> {
+  const raw = text ?? await readText(a.path);
   const rel = path.relative(ctx.packRoot, a.path);
   const findings: Diagnostic[] = [];
   let on: string; let off: string;
@@ -152,8 +152,9 @@ export async function refine(a: Artifact, ctx: TautContext): Promise<{ artifact:
   // The engine parses SKILL frontmatter (strict subset) at compile time; agents it copies
   // byte-for-byte (or re-renders from a regex on `model:`), so their frontmatter is judged
   // by the generic parser over the gated text.
+  const lineMap = gatedLineMap(raw, on);
   if (a.kind === 'agent') {
-    const fm = parseFrontmatter(on, a.path);
+    const fm = { ...parseFrontmatter(on, a.path), lineMap };
     const dOn = fm.data;
     return { artifact: { ...a, fm, description: typeof dOn.description === 'string' ? dOn.description : a.description, body: bodyOf(on, fm), tools: unionTools(a.tools, toolList(dOn.tools)), model: typeof dOn.model === 'string' ? dOn.model : null }, findings };
   }
@@ -175,7 +176,7 @@ export async function refine(a: Artifact, ctx: TautContext): Promise<{ artifact:
     findings.push({ code: 'taut-empty-wiring', severity: 'info', message: '`metadata.taut: {}` — the engine reads `{}` as a string (harmless); write no `metadata` key instead', path: a.path, line: a.fm.lines.metadata });
   // the engine view replaces the generic parse: same shape, engine-decided values
   const generic = parseFrontmatter(on, a.path);      // for line numbers / duplicates bookkeeping
-  const fm = { ...generic, data: fmOn };
+  const fm = { ...generic, data: fmOn, lineMap };
   if (a.kind === 'skill') {
     const s: SkillArtifact = {
       ...a, fm,
@@ -194,6 +195,22 @@ export async function refine(a: Artifact, ctx: TautContext): Promise<{ artifact:
     return { artifact: s, findings };
   }
   return { artifact: a, findings };
+}
+
+// The engine's marker pass REMOVES lines (the markers, the branch that is off) and keeps the
+// rest verbatim, so the gated text is a subsequence of the file: walk both and record where
+// each kept line came from. Should a future engine rewrite a line, the walk runs past the end
+// and the remaining lines keep their own numbers rather than point somewhere wrong.
+export function gatedLineMap(raw: string, gated: string): number[] {
+  const r = raw.split(/\r?\n/), g = gated.split(/\r?\n/);
+  const map: number[] = [0];
+  let j = 0;
+  for (let i = 0; i < g.length; i++) {
+    let k = j;
+    while (k < r.length && r[k] !== g[i]) k++;
+    if (k < r.length) { map.push(k + 1); j = k + 1; } else map.push(i + 1);
+  }
+  return map;
 }
 
 function unionTools(a: SkillArtifact['allowedTools'], b: SkillArtifact['allowedTools']): SkillArtifact['allowedTools'] {

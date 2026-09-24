@@ -71,6 +71,10 @@ export interface Frontmatter {
   diagnostics: Diagnostic[];
   /** line number (1-based) of every top-level key, first occurrence */
   lines: Record<string, number>;
+  // Set when this frontmatter was parsed from ENGINE-GATED text (TAUT capability markers
+  // removed): lineMap[gatedLine] = the line in the file on disk. Findings are reported in
+  // file lines — the lines a reader opens — through toFileLines().
+  lineMap?: number[];
   /** keys that appeared more than once — a strong signal of TAUT capability-marker branches */
   duplicates: string[];
   bodyOffset: number;      // line number (1-based) where the body starts

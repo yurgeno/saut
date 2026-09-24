@@ -171,13 +171,16 @@ agentskills `evals.json` suite imports as cases. Full detail, isolation and cost
 saut studio .
 ```
 
-One local page over the same functions: the form writes frontmatter through the emitter (so it
-compiles), the passport shows cost, the enforcement matrix and every finding on open and on save, the
-Compiled tab shows the exact per-harness bytes for a TAUT pack, and the Bench tab runs L1–L4
-with the events streaming live. **Validate pack** runs the pack's own `tools/validate-pack.sh`.
+One local page over the same functions. The **Overview** ranks every skill and agent by what is
+wrong with it; the **Skill** view edits one — a form and the raw file, a Markdown editor, the
+findings re-linted as you type, each with how to fix it and a previewable fix — and saves
+through a diff, changing only what you changed (comments, unknown keys and capability-marker
+branches survive). **Bench** runs L1–L4 with the events streaming live; **Harnesses** is the
+registry as reference. A compiled TAUT workspace opens read-only, naming the pack source.
 
-Loopback only, per-session token in a custom header, Origin and Host checks, writes contained
-under the root — the same contour as the TAUT panel. Details: [docs/STUDIO.md](docs/STUDIO.md).
+Loopback only, per-session token in a custom header, no inline scripts, Origin and Host checks,
+writes contained under the root — the same contour as the TAUT panel. Details:
+[docs/STUDIO.md](docs/STUDIO.md).
 
 ## TAUT packs
 

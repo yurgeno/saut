@@ -31,9 +31,24 @@ test('serves the page with the session token, and the token is not guessable', a
   const html = await r.text();
   assert.equal(r.headers.get('content-type'), 'text/html; charset=utf-8');
   assert.equal(r.headers.get('cache-control'), 'no-store');
-  assert.ok(html.includes(`const TOKEN = '${studio.token}'`));
+  assert.ok(html.includes(`<meta name="saut-token" content="${studio.token}">`), 'the token rides in a meta tag');
   assert.ok(!html.includes('%%TOKEN%%'));
   assert.match(studio.token, /^[0-9a-f]{32}$/);
+  // no inline script at all: the policy can then forbid them
+  assert.deepEqual([...html.matchAll(/<script\b([^>]*)>/g)].map((m) => /\bsrc=/.test(m[1])), [true]);
+  assert.match(r.headers.get('content-security-policy'), /script-src 'self';/);
+  assert.doesNotMatch(r.headers.get('content-security-policy'), /script-src[^;]*unsafe-inline/);
+});
+
+test('the page assets are served by name only, under the same policy', async () => {
+  for (const [p, type] of [['/studio.js', 'text/javascript'], ['/studio.css', 'text/css'], ['/vendor/codemirror.js', 'text/javascript']]) {
+    const r = await getNoToken(p);
+    assert.equal(r.status, 200, p);
+    assert.match(r.headers.get('content-type'), new RegExp(type));
+    assert.match(r.headers.get('content-security-policy'), /default-src 'none'/);
+  }
+  assert.match(await (await getNoToken('/vendor/codemirror.js')).text(), /EditorView/);
+  for (const p of ['/studio.html', '/server.mts', '/vendor/../server.mts', '/%2e%2e/package.json']) assert.equal((await getNoToken(p)).status, p === '/' ? 200 : 404, p);
 });
 
 // fetch() refuses to set Host (a forbidden header), so the rebinding guard is probed raw.
@@ -79,13 +94,15 @@ test('the page cannot be framed and declares a restrictive policy', async () => 
 // This drives the page's OWN api() — lifted from the served HTML — against the server.
 test('the served page reaches every read route with its own api()', async () => {
   const html = await (await getNoToken('/')).text();
-  const token = html.match(/const TOKEN = '([0-9a-f]+)'/)[1];
-  const src = html.match(/async function api\(path, body\) \{[\s\S]*?\n\}/)[0];
+  const token = html.match(/<meta name="saut-token" content="([0-9a-f]+)">/)[1];
+  const js = await (await getNoToken('/studio.js')).text();
+  const src = js.match(/async function api\(path, body\) \{[\s\S]*?\n\}/)[0];
   const api = new Function('fetch', 'TOKEN', `${src}\nreturn api;`)((p, init) => fetch(base + p, init), token);
   const ctx = await api('/api/context');
   assert.ok(ctx.artifacts.some((a) => a.name === 'fx-clean'), 'the page loads its context');
-  const pass = await api('/api/artifact?path=' + encodeURIComponent(path.join(root, 'skills', 'fx-clean', 'SKILL.md')));
-  assert.equal(pass.frontmatter.name, 'fx-clean', 'the page opens an artifact');
+  const pass = await api('/api/artifact?path=' + encodeURIComponent('skills/fx-clean/SKILL.md'));
+  assert.equal(pass.frontmatter.name, 'fx-clean', 'the page opens an artifact by its relative path');
+  assert.ok((await api('/api/overview')).rows.length, 'and the overview');
 });
 
 test('containment resolves symlinks: a link out of the root is refused for read and write', async () => {
@@ -105,7 +122,10 @@ test('containment resolves symlinks: a link out of the root is refused for read 
 
 test('GET /api/context: artifacts, harness registry with semantics, tool registry', async () => {
   const j = await (await get('/api/context')).json();
-  assert.equal(j.root, root);
+  assert.equal(j.root, path.basename(root), 'the page is told the root\'s name, not where it lives');
+  assert.ok(j.artifacts.every((a) => !path.isAbsolute(a.path)), 'artifact paths are relative to the root');
+  assert.equal(j.mode, 'generic');
+  assert.equal(j.capabilities.write, true);
   assert.ok(j.artifacts.some((a) => a.name === 'fx-clean' && a.kind === 'skill'));
   assert.ok(j.artifacts.some((a) => a.name === 'fx-agent' && a.kind === 'agent'));
   const cc = j.harnesses.find((h) => h.id === 'claude-code');
@@ -147,18 +167,25 @@ test('POST /api/save: creates a new skill in the spec layout, re-lints it, and c
   assert.equal(r.status, 200);
   const j = await r.json();
   assert.equal(j.created, true);
-  assert.equal(j.path, path.join(root, 'skills', 'studio-made', 'SKILL.md'));
+  assert.equal(j.path, path.join('skills', 'studio-made', 'SKILL.md'));
   assert.deepEqual(j.passport.findings, [], 'the artifact the form produced lints clean');
-  const text = await fs.readFile(j.path, 'utf8');
+  const file = path.join(root, j.path);
+  const text = await fs.readFile(file, 'utf8');
   assert.match(text, /^---\nname: studio-made\n/);
   assert.match(text, /\n# studio-made\n/);
 
-  const again = await (await post('/api/save', {
-    kind: 'skill', name: 'studio-made', path: j.path,
-    frontmatter: { name: 'studio-made', description: 'Updated. Invoke: studio-made.', 'disable-model-invocation': true, 'allowed-tools': ['Read'] },
-    body: '# studio-made\n\nRead only.\n',
-  })).json();
+  // an existing file is never re-emitted from the form: that dropped every key it did not show
+  const reemit = await post('/api/save', { kind: 'skill', name: 'studio-made', path: j.path, frontmatter: { name: 'studio-made' }, body: 'x' });
+  assert.equal(reemit.status, 400);
+  assert.match((await reemit.json()).error, /already exists — an existing file is saved as text/);
+  // it is saved as text, against the hash it was read with
+  const edited = text.replace('Read the files and report.', 'Read the files, then report.');
+  assert.equal((await post('/api/save', { path: j.path, text: edited, base: 'deadbeefdeadbeef' })).status, 400, 'a stale base is refused');
+  const again = await (await post('/api/save', { path: j.path, text: edited, base: j.passport.base })).json();
   assert.equal(again.created, false);
+  assert.equal(await fs.readFile(file, 'utf8'), edited);
+  const broken = await post('/api/save', { path: j.path, text: '---\nname: [unterminated\n---\nx\n', base: again.passport.base });
+  assert.equal(broken.status, 400, 'text that no longer parses is refused');
 
   for (const p of ['/etc/saut-nope.md', path.join(root, '..', 'escape.md')]) {
     const bad = await post('/api/save', { kind: 'skill', name: 'x', path: p, frontmatter: { name: 'x' }, body: '' });
@@ -230,13 +257,18 @@ test('the Studio runs L4: the level is not clamped to 3', async () => {
 // The page is not run in a browser here, so guard the wiring statically: every form field the
 // page renders must mark the form dirty, and everything that replaces the form must ask first.
 test('the page tracks unsaved edits on every field and asks before discarding them', async () => {
-  const html = await (await getNoToken('/')).text();
-  const fields = [...html.matchAll(/<(?:input|textarea)[^>]*\bid="(f_[a-zA-Z]+|body)"/g)].map((m) => m[1]);
-  assert.ok(fields.length >= 12, `form fields found: ${fields}`);
+  const shell = await (await getNoToken('/')).text();
+  const js = await (await getNoToken('/studio.js')).text();
+  const html = shell + js;
+  const fields = [...shell.matchAll(/<(?:input|textarea)[^>]*\bid="(f_[a-zA-Z]+)"/g)].map((m) => m[1]);
+  assert.ok(fields.length >= 11, `form fields found: ${fields}`);
+  assert.match(js, /updateListener\.of\(\(u\) => \{ if \(u\.docChanged && !quiet\) onEdit\(\); \}\)/, 'an edit in either editor marks the form dirty');
   const wired = new Set([...html.matchAll(/for \(const id of \[([^\]]+)\]\)/g)].flatMap((m) => [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1])));
   for (const f of fields) assert.ok(wired.has(f), `${f} does not mark the form dirty`);
   for (const guard of [
-    /b\.onclick = \(\) => \{ if \(confirmDiscard\(\)\) openArtifact/,
+    /tr\.onclick = \(\) => \{ if \(confirmDiscard\(\)\) openArtifact/,
+    /if \(a && confirmDiscard\(\)\) openArtifact/,
+    /if \(next && confirmDiscard\(\)\) openArtifact/,
     /\$\('newSkill'\)\.onclick = \(\) => \{ if \(confirmDiscard\(\)\)/,
     /\$\('newAgent'\)\.onclick = \(\) => \{ if \(confirmDiscard\(\)\)/,
     /\$\('revert'\)\.onclick = \(\) => \{ if \(current && current\.path && confirmDiscard\(\)\)/,
@@ -283,8 +315,8 @@ test('POST /api/fix: preview, apply against the previewed text only, and nothing
 });
 
 test('the page renders explained findings and wires the fix preview', async () => {
-  const html = await (await getNoToken('/')).text();
-  for (const needle of ['function drawFindings', 'How to fix:', 'why it matters', "api('/api/fix'", "$('modalApply').disabled = dirty", 'function goToLine'])
+  const html = await (await getNoToken('/studio.js')).text();
+  for (const needle of ['function drawFindings', 'How to fix:', 'why it matters', "api('/api/fix'", "'Apply and save', dirty)", 'function goToLine'])
     assert.ok(html.includes(needle), needle);
 });
 

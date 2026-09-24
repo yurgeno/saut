@@ -201,9 +201,15 @@ export function bodyOf(text: string, fm: Frontmatter): string {
 
 // Emit a frontmatter block that this parser (and the TAUT engine's stricter one) re-reads
 // identically: single-line scalars, inline lists for flat string arrays, 2-space nesting.
+// One string scalar the way the emitter writes it: bare when that re-reads identically, else
+// single-quoted (the form the TAUT engine's strict parser accepts).
+export function emitScalar(s: string): string {
+  return /^[A-Za-z0-9_.\-/ <>]*$/.test(s) && !/^(true|false|null|~|-?\d+(\.\d+)?)$/.test(s) && !s.includes(': ') && !s.startsWith('[') && !s.startsWith('{') && !s.startsWith('#') && s.trim() === s ? s : `'${s.replaceAll("'", "''")}'`;
+}
+
 export function emitFrontmatter(data: Record<string, unknown>): string {
   const out: string[] = ['---'];
-  const q = (s: string) => (/^[A-Za-z0-9_.\-/ <>]*$/.test(s) && !/^(true|false|null|~|-?\d+(\.\d+)?)$/.test(s) && !s.includes(': ') && !s.startsWith('[') && !s.startsWith('{') && !s.startsWith('#') && s.trim() === s ? s : `'${s.replaceAll("'", "''")}'`);
+  const q = emitScalar;
   const emit = (k: string, v: unknown, indent: number) => {
     const pad = ' '.repeat(indent);
     if (Array.isArray(v)) {

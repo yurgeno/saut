@@ -8,9 +8,14 @@ keep the tool what it is.
 ```bash
 git clone https://github.com/yurgeno/saut.git
 cd saut
-npm install        # dev dependencies only: typescript + @types/node
+npm install        # dev dependencies only: typescript, @types/node, esbuild, CodeMirror
 npm test           # tsc --noEmit && node --test
 ```
+
+The Studio's editor is CodeMirror 6, bundled once into `lib/studio/vendor/codemirror.js` (the
+entry point is `tools/codemirror-entry.mjs`). After bumping any `@codemirror/*` or `codemirror`
+devDependency, rebuild it with `npm run build:vendor` and commit the result — users never
+install it, so SAUT keeps no runtime dependencies.
 
 Node ≥ 24 is required: the core is TypeScript executed natively via type stripping, `tsc`
 is only the checker. Linux and macOS are the supported platforms. The whole suite runs

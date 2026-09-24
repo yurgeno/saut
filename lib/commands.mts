@@ -9,7 +9,7 @@ import { lintArtifact, matrix, sortDiags, toSarif } from './lint.mts';
 import { explain } from './rules.mts';
 import { deploymentOf, guidanceStatus, lintGuidance, lintModelTiers, localCatalogs, sandboxedAgents } from './guidance.mts';
 import { applyFix, lineDiff } from './fix.mts';
-import { discoverDetailed, loadAgent } from './skill.mts';
+import { discoverDetailed, loadAgent, toFileLines } from './skill.mts';
 import { buildRegistry } from './tools.mts';
 import { scan } from './scan.mts';
 import { readUsage, usageFor, type UsageData } from './usage.mts';
@@ -133,7 +133,7 @@ export async function runLint(targets: string[], opts: Opts): Promise<{ diagnost
       ds.push(...lintWiring(a, taut));
     }
     ds.push(...lintGuidance(a, { harnesses, local, taut, sandboxed }));
-    diagnostics.push(...ds);
+    diagnostics.push(...toFileLines(ds, a));
   }
   if (dep) diagnostics.push(...lintModelTiers(dep, harnesses, local));
   let scanNote: string | null = null;

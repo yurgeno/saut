@@ -59,8 +59,18 @@ function str(v: unknown): string | null {
   return typeof v === 'string' ? v : v === undefined || v === null ? null : String(v);
 }
 
+// Findings computed on an engine-gated artifact carry gated line numbers; report file lines.
+export function toFileLines(ds: Diagnostic[], a: Artifact): Diagnostic[] {
+  const map = a.fm.lineMap;
+  return map ? ds.map((d) => (d.line && map[d.line] ? { ...d, line: map[d.line] } : d)) : ds;
+}
+
 export async function loadSkill(file: string): Promise<SkillArtifact> {
-  const text = await readText(file);
+  return skillFromText(file, await readText(file));
+}
+
+// The same artifact from text that is not (yet) on disk — the Studio lints an unsaved edit.
+export function skillFromText(file: string, text: string): SkillArtifact {
   const fm = parseFrontmatter(text, file);
   const d = fm.data;
   const dir = path.dirname(file);
@@ -84,7 +94,10 @@ export async function loadSkill(file: string): Promise<SkillArtifact> {
 }
 
 export async function loadAgent(file: string): Promise<AgentArtifact> {
-  const text = await readText(file);
+  return agentFromText(file, await readText(file));
+}
+
+export function agentFromText(file: string, text: string): AgentArtifact {
   const fm = parseFrontmatter(text, file);
   const d = fm.data;
   return {

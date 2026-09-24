@@ -36,8 +36,16 @@ import { load, type Opts } from '../commands.mts';
 
 const run = promisify(execFile);
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const PAGE = readFileSync(path.join(HERE, 'studio.html'), 'utf8');
-const renderPage = (token: string): string => PAGE.replace('%%TOKEN%%', token);
+// The page is split into a shell, a script, a stylesheet and the vendored editor, all served
+// from this directory by name (never by a path the request chooses). The shell carries the
+// session token in a <meta>, so no script needs to be inline and the policy can forbid them.
+const ASSETS: Record<string, { file: string; type: string }> = {
+  '/studio.js': { file: 'studio.js', type: 'text/javascript; charset=utf-8' },
+  '/studio.css': { file: 'studio.css', type: 'text/css; charset=utf-8' },
+  '/vendor/codemirror.js': { file: 'vendor/codemirror.js', type: 'text/javascript; charset=utf-8' },
+};
+const CSP = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
+const renderPage = (token: string): string => readFileSync(path.join(HERE, 'studio.html'), 'utf8').replace('%%TOKEN%%', token);
 
 const NAME = /^[a-z0-9][a-z0-9-]*$/;                       // skill/agent id (spec shape)
 const MAX_JOBS = 32;                                       // completed bench runs kept for replay
@@ -63,55 +71,158 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
   const hostOk = (host: string | undefined): boolean =>
     host === `127.0.0.1:${boundPort}` || host === `localhost:${boundPort}`;
 
+  // Paths cross the API relative to the root — the page never needs (or shows) where the root
+  // lives on this machine, which a hosted Studio must not reveal. Absolute paths are still
+  // accepted from local callers.
+  const resolveIn = (p: unknown): string => path.resolve(root, String(p ?? ''));
+  const relOf = (abs: string): string => path.relative(root, abs) || '.';
+
+  // A compiled TAUT workspace seals its files with taut.lock: an edit there is overwritten by
+  // the next `taut update` and makes `taut verify` fail. Those files are shown read-only, with
+  // the pack source they were compiled from.
+  interface Compiled { source: string; pack: string | null; commit: string | null; lockDir: string }
+  async function lockMap(): Promise<Map<string, Compiled>> {
+    const out = new Map<string, Compiled>();
+    let dir = realRoot;
+    for (let i = 0; i < 5; i++) {
+      const lock = path.join(dir, 'taut.lock');
+      try {
+        const j = JSON.parse(await readText(lock));
+        for (const e of Array.isArray(j.artifacts) ? j.artifacts : [])
+          if (typeof e?.id === 'string') out.set(path.join(dir, e.id), { source: String(e.source ?? ''), pack: j.data?.pack ?? null, commit: typeof j.data?.commit === 'string' ? j.data.commit.slice(0, 7) : null, lockDir: dir });
+        return out;
+      } catch { /* not here — look one level up */ }
+      const up = path.dirname(dir);
+      if (up === dir) break;
+      dir = up;
+    }
+    return out;
+  }
+  const compiledOf = async (abs: string): Promise<Compiled | null> => (await lockMap()).get(await fs.realpath(abs).catch(() => abs)) ?? null;
+
+  // Which harness a compiled copy is for: the discovery directory it sits in.
+  function harnessFor(abs: string, lockDir: string, harnesses: { id: string; skillsDirs: string[]; agentsDir: string | null }[]): string | null {
+    const r = path.relative(lockDir, abs);
+    const h = harnesses.find((x) => x.skillsDirs.some((d) => r.startsWith(d + path.sep)) || (x.agentsDir && r.startsWith(x.agentsDir + path.sep)));
+    return h?.id ?? null;
+  }
+
   // Everything the page needs to draw itself: artifacts, harness registry, tool registry,
   // TAUT context. Recomputed per request — a file edited in an IDE shows up on reload.
   async function context() {
     const { artifacts, harnesses, registry, taut, note } = await load([root], opts);
+    const locked = await lockMap();
+    const real = async (p: string) => fs.realpath(p).catch(() => p);
     return {
-      root,
+      root: path.basename(root),
       note,
-      taut: taut ? { packRoot: taut.packRoot, engine: taut.engine, engineCommit: taut.engineCommit, deployment: taut.project?.name ?? null, projects: taut.projects.map((p) => p.name) } : null,
+      mode: taut ? 'taut' : locked.size ? 'compiled' : 'generic',
+      // what this backend can do — the page shows or hides by these, never by guessing where it runs
+      capabilities: { write: true, fix: true, check: true, compose: true, bench: harnesses.some((h) => h.runner), validate: !!taut, history: false, llmReview: false },
+      taut: taut ? { engineCommit: taut.engineCommit, deployment: taut.project?.name ?? null, projects: taut.projects.map((p) => p.name) } : null,
       harnesses: harnesses.map((h) => ({
-        id: h.id, title: h.title, runner: !!h.runner, skillsDirs: h.skillsDirs, agentsDir: h.agentsDir,
+        id: h.id, title: h.title, runner: !!h.runner, skillsDirs: h.skillsDirs, agentsDir: h.agentsDir, docs: h.docs,
         toolAllowlist: h.toolAllowlist, agentAllowlist: h.agentAllowlist, denyMechanism: h.denyMechanism,
         frontmatterFields: h.frontmatterFields, builtinTools: h.builtinTools, degradations: h.degradations,
-        listing: h.listing,
+        listing: h.listing, modelPin: h.modelPin, models: h.models ?? null,
       })),
       tools: { builtin: registry.builtin, servers: registry.servers },
-      artifacts: artifacts.map((a) => ({ kind: a.kind, name: a.name, path: a.path, description: a.description })),
+      artifacts: await Promise.all(artifacts.map(async (a) => {
+        const c = locked.get(await real(a.path)) ?? null;
+        return { kind: a.kind, name: a.name, path: relOf(a.path), description: a.description,
+          compiled: c ? { source: c.source, pack: c.pack, commit: c.commit, harness: harnessFor(await real(a.path), c.lockDir, harnesses) } : null };
+      })),
       // how old the vendor guidance is, and what the pack's own model ladder says against it
       guidance: guidanceStatus(harnesses),
       packFindings: await (async () => {
         const dep = taut ? await deploymentOf(taut) : null;
-        return dep ? sortDiags(explain(lintModelTiers(dep, harnesses, await localCatalogs(harnesses)))) : [];
+        return dep ? sortDiags(explain(lintModelTiers(dep, harnesses, await localCatalogs(harnesses)))).map((x) => ({ ...x, path: relOf(x.path) })) : [];
       })(),
     };
   }
 
   // One artifact's passport: source text, findings, cost, per-harness matrix and (TAUT) the
-  // compiled bytes. The same functions `saut lint|cost|passport` call.
-  async function passport(file: string) {
-    const abs = path.resolve(file);
+  // compiled bytes. The same functions `saut lint|cost|passport` call. With `text`, the
+  // passport of an UNSAVED edit: linted in memory, nothing written, no compile preview.
+  async function passport(file: string, text?: string) {
+    const abs = resolveIn(file);
     if (!(await contained(abs))) throw new Error('path outside the studio root');
-    const { artifacts, harnesses, registry, agentsByName, taut } = await load([abs], opts);
-    const a = artifacts[0];
-    if (!a) throw new Error(`no skill or agent at ${file}`);
+    const { artifacts, harnesses, registry, agentsByName, taut, tautFindings } = await load([abs], opts);
+    const onDisk = artifacts[0];
+    if (!onDisk) throw new Error(`no skill or agent at ${relOf(abs)}`);
+    const { skillFromText, agentFromText, toFileLines } = await import('../skill.mts');
+    const { parseFrontmatter } = await import('../frontmatter.mts');
+    // In a TAUT pack `load` already hands back the engine-gated artifact and the engine's
+    // findings; an unsaved text goes through the same gate here.
+    let a: Artifact = onDisk;
+    let engine: Diagnostic[] = tautFindings.filter((x) => x.path === onDisk.path);
+    if (text !== undefined) {
+      a = onDisk.kind === 'skill' ? skillFromText(onDisk.path, text) : agentFromText(onDisk.path, text);
+      if (taut) { const { refine } = await import('../adapters/taut.mts'); const r = await refine(a, taut, text); a = r.artifact; engine = r.findings; }
+    }
     let findings: Diagnostic[] = lintArtifact(a, { harnesses, registry, agentsByName });
     if (taut) {
-      const { lintWiring, refine } = await import('../adapters/taut.mts');
+      const { lintWiring } = await import('../adapters/taut.mts');
       findings = findings.filter((x) => !x.code.startsWith('taut-'));
-      const r = await refine(a, taut);
-      findings.push(...r.findings, ...lintWiring(r.artifact, taut));
+      findings.push(...lintWiring(a, taut));
     }
     const dep = taut ? await deploymentOf(taut) : null;
     findings.push(...lintGuidance(a, { harnesses, local: await localCatalogs(harnesses), taut, sandboxed: sandboxedAgents(dep) }));
+    findings = [...toFileLines(findings, a), ...engine];      // file lines, the ones the editor shows
     const cost = await costOf(a, { harness: harnesses.find((h) => h.id === 'claude-code') ?? null, exact: false, agentsByName: agentsByName as Map<string, Artifact> });
-    const compiled = taut ? (await previews(a, taut)).map((p) => ({ harness: p.harness, id: p.id, bytes: p.bytes, transform: p.transform, degradations: p.degradations, content: p.content.slice(0, 200000) })) : [];
+    const compiled = taut && text === undefined ? (await previews(a, taut)).map((p) => ({ harness: p.harness, id: p.id, bytes: p.bytes, transform: p.transform, degradations: p.degradations, content: p.content.slice(0, 200000) })) : [];
+    const source = text ?? await readText(a.path);
+    const raw = parseFrontmatter(source, a.path);           // the form edits the FILE, branches and all
+    const lock = await compiledOf(a.path);
     return {
-      kind: a.kind, name: a.name, path: a.path,
-      text: await readText(a.path),
-      frontmatter: a.fm.data, duplicates: a.fm.duplicates, lines: a.fm.lines, bodyOffset: a.fm.bodyOffset,
-      findings: sortDiags(explain(findings)), cost, over: overBudget(cost, a, {}), matrix: matrix(a, harnesses), compiled,
+      kind: a.kind, name: a.name, path: relOf(a.path),
+      text: source, base: hashOf(source),
+      readOnly: lock ? `compiled from ${lock.pack ?? 'the pack'}: ${lock.source}${lock.commit ? ` @${lock.commit}` : ''} — edit the source and recompile` : null,
+      frontmatter: raw.data, duplicates: raw.duplicates, lines: raw.lines, bodyOffset: raw.bodyOffset,
+      findings: sortDiags(explain(findings)).map((x) => ({ ...x, path: relOf(x.path) })), cost, over: overBudget(cost, a, {}), matrix: matrix(a, harnesses), compiled,
+    };
+  }
+
+  const hashOf = (t: string) => crypto.createHash('sha256').update(t).digest('hex').slice(0, 16);
+
+  // The table on the Overview: per artifact, the counts a reader sorts by. Compiled copies of
+  // one skill (one per harness) collapse to one row.
+  async function overview() {
+    const { runLint } = await import('../commands.mts');
+    const lint = await runLint([root], opts);
+    const locked = await lockMap();
+    const byPath = new Map<string, Diagnostic[]>();
+    for (const x of lint.diagnostics) byPath.set(x.path, [...(byPath.get(x.path) ?? []), x]);
+    const cc = lint.harnesses.find((h) => h.id === 'claude-code') ?? null;
+    const rows = new Map<string, any>();
+    for (const a of lint.artifacts) {
+      const ds = byPath.get(a.path) ?? [];
+      const realPath = await fs.realpath(a.path).catch(() => a.path);
+      const c = locked.get(realPath) ?? null;
+      const key = c ? `${a.kind}:${a.name}` : a.path;
+      const harness = c ? harnessFor(realPath, c.lockDir, lint.harnesses) : null;
+      const prev = rows.get(key);
+      if (prev) { prev.copies.push({ path: relOf(a.path), harness }); continue; }
+      const cost = await costOf(a, { harness: cc, exact: false, agentsByName: new Map(lint.artifacts.filter((x) => x.kind === 'agent').map((x) => [x.name, x])) as Map<string, Artifact> });
+      const count = (s: string) => ds.filter((x) => x.severity === s).length;
+      rows.set(key, {
+        kind: a.kind, name: a.name, path: relOf(a.path), description: a.description,
+        high: count('high'), medium: count('medium'), low: count('low'), info: count('info'),
+        fixable: ds.filter((x) => x.autofix).length,
+        guidance: { A: ds.filter((x) => x.guidance?.class === 'A').length, B: ds.filter((x) => x.guidance?.class === 'B').length, D: ds.filter((x) => x.guidance?.class === 'D').length },
+        security: ds.filter((x) => x.category === 'security').length,
+        alwaysOn: cost.alwaysOnTokens, invoke: cost.invokeTokens + (cost.transitive ?? []).reduce((n, t) => n + t.tokens, 0),
+        enforcement: Object.fromEntries(matrix(a, lint.harnesses).map((m) => [m.harness, m.allowlist])),
+        compiled: c ? { source: c.source, pack: c.pack, commit: c.commit } : null,
+        copies: c ? [{ path: relOf(a.path), harness }] : [],
+      });
+    }
+    const list = [...rows.values()];
+    const sum = (k: string) => list.reduce((n, r) => n + r[k], 0);
+    return {
+      rows: list,
+      totals: { artifacts: list.length, high: sum('high'), medium: sum('medium'), fixable: sum('fixable'), security: sum('security'), alwaysOn: sum('alwaysOn'),
+        outdated: list.reduce((n, r) => n + r.guidance.A, 0), hypotheses: list.reduce((n, r) => n + r.guidance.B, 0) },
     };
   }
 
@@ -143,19 +254,64 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
     return kind === 'agent' ? path.join(base, 'agents', `${name}.md`) : path.join(base, 'skills', name, 'SKILL.md');
   }
 
+  // Two ways in. An EXISTING file is saved as text — composed from the form (/api/compose) or
+  // edited in the Source view — against the hash of the text it was read as, so an edit made
+  // meanwhile in an IDE is refused rather than overwritten. A NEW artifact is emitted from the
+  // form's frontmatter into the spec layout.
+  async function writable(file: string): Promise<void> {
+    if (!(await contained(file))) throw new Error('path outside the studio root');
+    if (path.basename(file) !== 'SKILL.md' && !file.endsWith('.md')) throw new Error('refusing to write a non-markdown file');
+    const lock = await exists(file) ? await compiledOf(file) : null;
+    if (lock) throw new Error(`read-only: compiled from ${lock.pack ?? 'the pack'} (${lock.source}) — edit the source and recompile`);
+  }
+
   async function save(payload: any): Promise<{ path: string; created: boolean }> {
+    if (typeof payload.text === 'string') {
+      const file = resolveIn(payload.path);
+      await writable(file);
+      if (!(await exists(file))) throw new Error('no such file — a new artifact is created from the form');
+      const current = await readText(file);
+      if (payload.base !== hashOf(current)) throw new Error('the file changed on disk since it was opened — reload it (your edit is still in the editor)');
+      const { parseFrontmatter } = await import('../frontmatter.mts');
+      const broken = (t: string) => parseFrontmatter(t, file).diagnostics.filter((d) => d.code === 'frontmatter-syntax' || d.code === 'no-frontmatter').length;
+      if (broken(payload.text) > broken(current)) throw new Error('the frontmatter would not parse — fix the reported line first');
+      await writeContained(file, payload.text, false);
+      return { path: file, created: false };
+    }
     const kind = payload.kind === 'agent' ? 'agent' : 'skill';
     const name = String(payload.name ?? '');
     const body = String(payload.body ?? '');
     const fm = payload.frontmatter && typeof payload.frontmatter === 'object' ? payload.frontmatter : null;
     if (!fm) throw new Error('frontmatter is required');
-    const file = payload.path ? path.resolve(String(payload.path)) : await targetFor(kind, name, payload.project ?? null);
-    if (!(await contained(file))) throw new Error('path outside the studio root');
-    if (path.basename(file) !== 'SKILL.md' && !file.endsWith('.md')) throw new Error('refusing to write a non-markdown file');
-    const created = !(await exists(file));
+    const file = payload.path ? resolveIn(payload.path) : await targetFor(kind, name, payload.project ?? null);
+    await writable(file);
+    // Re-emitting an existing file from the form drops every key the form does not show
+    // (disallowed-tools, hooks, capability branches…) — existing files go through compose.
+    if (await exists(file)) throw new Error(`${relOf(file)} already exists — an existing file is saved as text (compose it from the form first)`);
     const text = emitFrontmatter(fm) + (body.startsWith('\n') ? body : '\n' + body);
-    await writeContained(file, text.endsWith('\n') ? text : text + '\n', created);
-    return { path: file, created };
+    await writeContained(file, text.endsWith('\n') ? text : text + '\n', true);
+    return { path: file, created: true };
+  }
+
+  // The form's edit, applied to the file text field by field (lib/compose.mts), returned as a
+  // diff for the reader to confirm before /api/save writes it.
+  // The text an edit amounts to: the Source view's text as is, or the form applied to the text
+  // it was filled from (`from` — the Source text after a switch — else the file on disk).
+  async function editedText(payload: any): Promise<{ file: string; disk: string; text: string; changed: string[] } | { reason: string }> {
+    const file = resolveIn(payload.path);
+    if (!(await contained(file))) throw new Error('path outside the studio root');
+    const disk = await readText(file);
+    if (typeof payload.text === 'string') return { file, disk, text: payload.text, changed: ['source'] };
+    const { compose } = await import('../compose.mts');
+    const kind = payload.kind === 'agent' ? 'agent' : 'skill';
+    const r = compose(typeof payload.from === 'string' ? payload.from : disk, kind, payload.form ?? {}, String(payload.body ?? ''));
+    return r.ok ? { file, disk, text: r.text, changed: r.changed } : { reason: r.reason };
+  }
+
+  async function composeEdit(payload: any) {
+    const e = await editedText(payload);
+    if ('reason' in e) return { ok: false, reason: e.reason };
+    return { ok: true, text: e.text, changed: e.changed, diff: lineDiff(e.disk, e.text), base: hashOf(e.disk) };
   }
 
   // Callers have checked containment. O_NOFOLLOW on the final component: a symlink planted at
@@ -172,13 +328,14 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
   // and the apply step carries the hash of the text the preview was computed from, so a file
   // edited in between is refused rather than patched blind.
   async function fix(payload: any) {
-    const file = path.resolve(String(payload.path ?? ''));
+    const file = resolveIn(payload.path);
     if (!(await contained(file))) throw new Error('path outside the studio root');
+    if (payload.apply) await writable(file);
     const pass = await passport(file);
     const want = JSON.stringify(payload.autofix ?? null);
     const finding = pass.findings.find((x) => x.autofix && JSON.stringify(x.autofix) === want);
     if (!finding?.autofix) throw new Error('that fix is not proposed for this file any more — reload it');
-    const base = crypto.createHash('sha256').update(pass.text).digest('hex').slice(0, 16);
+    const base = hashOf(pass.text);
     const r = applyFix(pass.text, finding.autofix);
     if (!r.ok) return { ok: false, reason: r.reason, diff: '', base };
     if (!payload.apply) return { ok: true, diff: lineDiff(pass.text, r.text), base, label: finding.autofix.label };
@@ -213,7 +370,7 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
   }
 
   async function startBench(payload: any): Promise<string> {
-    const file = path.resolve(String(payload.path ?? ''));
+    const file = resolveIn(payload.path);
     if (!(await contained(file))) throw new Error('path outside the studio root');
     const { artifacts, harnesses, taut } = await load([file], opts);
     const a = artifacts[0];
@@ -262,10 +419,17 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
         res.writeHead(200, {
           'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store',
           'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY',
-          'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+          'content-security-policy': CSP,
           'referrer-policy': 'no-referrer',
         });
         return res.end(renderPage(token));
+      }
+      if (req.method === 'GET' && Object.hasOwn(ASSETS, pathname)) {
+        const asset = ASSETS[pathname];
+        const body = await fs.readFile(path.join(HERE, asset.file)).catch(() => null);
+        if (!body) return send(404, { error: 'not found' });
+        res.writeHead(200, { 'content-type': asset.type, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'content-security-policy': CSP });
+        return res.end(body);
       }
       // READS carry content (artifact bodies, pack layout) — the same-origin policy stops a
       // foreign PAGE, not another local process scanning loopback ports. Every /api route
@@ -274,6 +438,7 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
         && !tokenOk(req.headers['x-saut-token'] ?? url.searchParams.get('token'), token))
         return send(403, { error: 'bad or missing token' });
       if (req.method === 'GET' && pathname === '/api/context') return send(200, await context());
+      if (req.method === 'GET' && pathname === '/api/overview') return send(200, await overview());
       if (req.method === 'GET' && pathname === '/api/artifact') {
         const p = url.searchParams.get('path') ?? '';
         try { return send(200, await passport(p)); } catch (e) { return send(400, { error: (e as Error).message }); }
@@ -313,7 +478,13 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
           try { payload = raw ? JSON.parse(raw) : {}; }
           catch (e) { return send(400, { error: `malformed JSON body: ${(e as Error).message}` }); }
           if (pathname === '/api/emit') return send(200, { text: emitFrontmatter(payload.frontmatter ?? {}) });
-          if (pathname === '/api/save') { const r = await save(payload); return send(200, { ...r, passport: await passport(r.path) }); }
+          if (pathname === '/api/save') { const r = await save(payload); return send(200, { ...r, path: relOf(r.path), passport: await passport(r.path) }); }
+          if (pathname === '/api/compose') return send(200, await composeEdit(payload));
+          if (pathname === '/api/check') {
+            const e = await editedText(payload);
+            if ('reason' in e) return send(200, { composeError: e.reason });
+            return send(200, await passport(e.file, e.text));
+          }
           if (pathname === '/api/fix') return send(200, await fix(payload));
           if (pathname === '/api/test') return send(200, { id: await startBench(payload) });
           if (pathname === '/api/validate') {
