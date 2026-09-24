@@ -3,6 +3,17 @@
 All notable changes to SAUT. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions are [semantic](https://semver.org/) and each release is tagged.
 
+## [0.7.1] — 2026-09-24
+
+### Fixed
+
+- **A closed reader crashed the CLI on macOS.** 0.7.0 kept the exit code when a reader closes
+  a pipe early (EPIPE), but a child's stdout on macOS is a socket, which reports the same
+  event as `ENOTCONN` (or `ECONNRESET`) — the CLI then crashed with a stack trace. All three
+  are now treated as a closed reader. Caught by the macOS CI job of the 0.7.0 release.
+
+[0.7.1]: https://github.com/yurgeno/saut/releases/tag/v0.7.1
+
 ## [0.7.0] — 2026-09-24
 
 The Studio becomes a workbench: every finding says how to fix it, mechanical fixes apply

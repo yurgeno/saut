@@ -163,8 +163,10 @@ const table = { lint: cmdLint, cost: cmdCost, passport: cmdPassport, preview: cm
 // callback fires once everything queued before it has been handed to the OS.
 // A reader that stops early (`saut lint --json | head`) closes the pipe: that is not a failure
 // of the command. The rest of its output is dropped and it exits with the code it computes.
+// A pipe reports it as EPIPE; a socket (a child's stdio on macOS) as ENOTCONN or ECONNRESET.
+const CLOSED = new Set(['EPIPE', 'ENOTCONN', 'ECONNRESET']);
 const broken = new Set();
-for (const s of [process.stdout, process.stderr]) s.on('error', (e) => { if (e.code === 'EPIPE') broken.add(s); else throw e; });
+for (const s of [process.stdout, process.stderr]) s.on('error', (e) => { if (CLOSED.has(e.code)) broken.add(s); else throw e; });
 const drained = (stream) => broken.has(stream) || stream.destroyed ? Promise.resolve()
   : new Promise((resolve) => { stream.once('close', resolve); stream.write('', () => resolve()); });
 async function exit(code) {

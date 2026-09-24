@@ -145,7 +145,7 @@ test('CLI: a reader that closes the pipe early does not change the exit code', a
     child.on('close', (c) => resolve({ c, err }));
   });
   assert.equal(code.c, full.code);
-  assert.doesNotMatch(code.err, /EPIPE|Unhandled/);
+  assert.doesNotMatch(code.err, /Error|EPIPE|ENOTCONN|Unhandled/, 'no crash, whatever the platform calls a closed reader');
 });
 
 // ---- the Studio -------------------------------------------------------------------------
