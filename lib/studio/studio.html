@@ -126,25 +126,64 @@
 
   <!-- ── Bench ─────────────────────────────────────────────────── -->
   <section id="view-bench" class="view" hidden>
-    <div class="card">
-      <div class="row"><span>Artifact: <b id="benchArtifact">— open one in the Skill view</b></span></div>
-      <div class="row">
-        <select id="benchLevel">
-          <option value="1">L1 compile (free)</option>
-          <option value="2">L2 + trigger</option>
-          <option value="3" selected>L3 + obedience</option>
-          <option value="4">L4 + scenario graders</option>
-        </select>
-        <label class="inline">runs <input type="text" id="benchRuns" value="1" class="narrow"></label>
-        <label class="inline">max cost, USD <input type="text" id="benchCost" value="0.50" class="narrow"></label>
+    <div class="bench-grid">
+      <div>
+        <div class="card">
+          <h2>Run</h2>
+          <div class="row"><span>Artifact: <b id="benchArtifact">— open one in the Skill view</b></span></div>
+          <div class="row">
+            <select id="benchLevel" class="auto">
+              <option value="1">L1 compile (free)</option>
+              <option value="2">L2 + trigger</option>
+              <option value="3" selected>L3 + obedience</option>
+              <option value="4">L4 + scenario graders</option>
+            </select>
+            <label class="inline">runs <input type="text" id="benchRuns" value="1" class="narrow"></label>
+            <label class="inline">max cost, USD <input type="text" id="benchCost" value="0.50" class="narrow"></label>
+            <label class="inline">case <select id="benchCase" class="auto"><option value="">all</option></select></label>
+          </div>
+          <table class="plain" id="benchHarnessTable"></table>
+          <div id="benchEstimate" class="estimate"></div>
+          <div class="row">
+            <button class="btn primary" id="runBench">Run</button>
+            <button class="btn" id="measureBench" title="the same cases on the file as saved and on your unsaved edit">Measure: saved vs my edit</button>
+            <button class="btn" id="validate">Validate pack</button>
+          </div>
+          <div id="pairHint" class="legend"></div>
+          <pre id="benchLog" hidden></pre>
+          <div id="benchMatrix"></div>
+        </div>
+        <div class="card">
+          <h2>Cases <span class="muted" id="casesNote"></span></h2>
+          <div id="caseList"></div>
+          <div class="row">
+            <button class="btn small" id="newCase">New case</button>
+            <button class="btn small" id="writeAuto" hidden>Write the generated cases as files</button>
+          </div>
+          <div id="caseEditor" hidden>
+            <div class="grid3">
+              <div><label for="c_name">name</label><input type="text" id="c_name" placeholder="implicit-review"></div>
+              <div><label for="c_invocation">invocation</label><select id="c_invocation"><option>implicit</option><option>explicit</option><option>control</option></select></div>
+              <div><label for="c_expect">expect</label><select id="c_expect"><option>fire</option><option>no-fire</option></select></div>
+            </div>
+            <label for="c_turns">max turns</label><input type="text" id="c_turns" value="8" class="narrow">
+            <label for="c_prompt">prompt <span class="muted">— what a user would type; for explicit, the harness adds its own invocation</span></label>
+            <textarea id="c_prompt" rows="6"></textarea>
+            <div class="row"><button class="btn small primary" id="saveCase">Save case</button><button class="btn small" id="cancelCase">Cancel</button><span class="muted mono" id="caseFile"></span></div>
+          </div>
+        </div>
       </div>
-      <div class="row" id="benchHarnesses"></div>
-      <div class="row">
-        <button class="btn primary" id="runBench">Run</button>
-        <button class="btn" id="validate">Validate pack</button>
+      <div>
+        <div class="card">
+          <h2>History</h2>
+          <div id="runList"></div>
+          <div class="row"><button class="btn small" id="compareBtn" disabled>Compare the two selected</button></div>
+        </div>
+        <div class="card" id="compareCard" hidden>
+          <h2 id="compareTitle">Compare</h2>
+          <div id="compareBody"></div>
+        </div>
       </div>
-      <pre id="benchLog" hidden></pre>
-      <div id="benchMatrix"></div>
     </div>
   </section>
 

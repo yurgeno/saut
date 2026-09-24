@@ -80,4 +80,9 @@ export interface BenchResult {
   startedAt: string;
   finishedAt: string;
   budget: { maxCostUsd: number | null; spentUsd: number; exhausted: boolean };
+  models?: Record<string, string | null>;   // the model each harness ran (null = the harness's own default)
+  meta?: BenchMeta;
 }
+
+// What a run was FOR — so a history can pair a before with an after.
+export interface BenchMeta { label?: string; pair?: string; note?: string }

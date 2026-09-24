@@ -9,10 +9,11 @@
 // DNS-rebinding guard pins the Host header to this loopback origin. Writes are contained под
 // the root the studio was started with, and only to a skill's SKILL.md or an agent .md.
 import { createServer } from 'node:http';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import fsSync, { readFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import type { Server } from 'node:http';
@@ -21,6 +22,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 import { runBench } from '../bench/bench.mts';
+import { DEFAULT_MODEL } from '../bench/runners.mts';
 import { newResultsDir } from '../bench/results.mts';
 import type { BenchResult } from '../bench/types.mts';
 import { costOf, overBudget } from '../cost.mts';
@@ -60,7 +62,7 @@ function tokenOk(given: unknown, token: string): boolean {
 
 export interface StudioHandle { server: Server; token: string; port: number; close: () => Promise<void> }
 
-interface BenchJob { id: string; events: { kind: string; text: string }[]; done: boolean; result?: BenchResult; error?: string; listeners: Set<(e: { kind: string; text: string } | null) => void> }
+interface BenchJob { id: string; events: { kind: string; text: string }[]; done: boolean; result?: BenchResult; runId?: string; pair?: { id: string; before: string; after: string }; error?: string; listeners: Set<(e: { kind: string; text: string } | null) => void> }
 
 export async function startStudio(root: string, opts: Opts & { port?: number }): Promise<StudioHandle> {
   const token = crypto.randomBytes(16).toString('hex');
@@ -127,6 +129,7 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
         listing: h.listing, modelPin: h.modelPin, models: h.models ?? null,
       })),
       tools: { builtin: registry.builtin, servers: registry.servers },
+      benchDefaults: DEFAULT_MODEL,
       artifacts: await Promise.all(artifacts.map(async (a) => {
         const c = locked.get(await real(a.path)) ?? null;
         return { kind: a.kind, name: a.name, path: relOf(a.path), description: a.description,
@@ -369,14 +372,7 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
     }
   }
 
-  async function startBench(payload: any): Promise<string> {
-    const file = resolveIn(payload.path);
-    if (!(await contained(file))) throw new Error('path outside the studio root');
-    const { artifacts, harnesses, taut } = await load([file], opts);
-    const a = artifacts[0];
-    if (!a) throw new Error('no artifact at that path');
-    const wanted: string[] = Array.isArray(payload.harnesses) ? payload.harnesses.map(String) : [];
-    const selected = harnesses.filter((h) => h.runner && (!wanted.length || wanted.includes(h.id)));
+  function newJob() {
     const id = crypto.randomBytes(6).toString('hex');
     const job: BenchJob = { id, events: [], done: false, listeners: new Set() };
     jobs.set(id, job);
@@ -388,18 +384,215 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
         if (j.done && !j.listeners.size) jobs.delete(key);
       }
     }
-    const push = (e: { kind: string; text: string }) => { job.events.push(e); for (const l of job.listeners) l(e); };
+    // Bench events name scratch and copy directories; the page is not told where anything lives.
+    const push = (e: { kind: string; text: string }) => { const x = { kind: e.kind, text: scrub(e.text) }; job.events.push(x); for (const l of job.listeners) l(x); };
+    const finish = () => { job.done = true; for (const l of job.listeners) l(null); };
+    return { id, job, push, finish };
+  }
+
+  // Bench options shared by a single run and a before/after pair; everything from the page
+  // is validated here — a model name is a string of model-name characters, nothing else.
+  function benchParams(payload: any, harnesses: { id: string; runner: unknown }[]) {
+    const wanted: string[] = Array.isArray(payload.harnesses) ? payload.harnesses.map(String) : [];
+    const selected = harnesses.filter((h) => h.runner && (!wanted.length || wanted.includes(h.id)));
+    const models: Record<string, string> = {};
+    if (payload.models && typeof payload.models === 'object')
+      for (const [h, m] of Object.entries(payload.models)) if (typeof m === 'string' && /^[A-Za-z0-9._:\/\[\]-]{1,80}$/.test(m.trim()) && selected.some((x) => x.id === h)) models[h] = m.trim();
+    const level = Math.min(4, Math.max(1, Math.trunc(Number(payload.level)) || 3)) as 1 | 2 | 3 | 4;
+    const runs = Math.max(1, Math.min(5, Number(payload.runs) || 1));
+    const maxCostUsd = payload.maxCost === undefined || payload.maxCost === null || payload.maxCost === '' ? null : Number(payload.maxCost);
+    const caseFilter = typeof payload.case === 'string' && /^[A-Za-z0-9._*-]{1,80}$/.test(payload.case) ? payload.case : undefined;
+    return { selected, models, level, runs, maxCostUsd, caseFilter };
+  }
+
+  async function startBench(payload: any): Promise<string> {
+    const file = resolveIn(payload.path);
+    if (!(await contained(file))) throw new Error('path outside the studio root');
+    if (typeof payload.variantText === 'string') return startPair(file, payload);
+    const { artifacts, harnesses, taut } = await load([file], opts);
+    const a = artifacts[0];
+    if (!a) throw new Error('no artifact at that path');
+    const p = benchParams(payload, harnesses);
+    const { id, job, push, finish } = newJob();
     const siblings = taut ? (await load([taut.packRoot], opts)).artifacts : artifacts;
     const outDir = await newResultsDir(a);
     runBench({
-      artifact: a, siblings, harnesses: selected, taut, level: Math.min(4, Math.max(1, Math.trunc(Number(payload.level)) || 3)) as 1 | 2 | 3 | 4,
-      runs: Math.max(1, Math.min(5, Number(payload.runs) || 1)), model: payload.model || undefined,
-      maxCostUsd: payload.maxCost === undefined || payload.maxCost === null || payload.maxCost === '' ? null : Number(payload.maxCost),
-      landscape: null, caseFilter: payload.case || undefined, outDir, keepScratch: false,
+      artifact: a, siblings, harnesses: p.selected as typeof harnesses, taut, level: p.level, runs: p.runs,
+      models: Object.keys(p.models).length ? p.models : undefined, meta: typeof payload.label === 'string' && payload.label ? { label: payload.label.slice(0, 60) } : undefined,
+      maxCostUsd: p.maxCostUsd, landscape: null, caseFilter: p.caseFilter, outDir, keepScratch: false,
       timeoutMs: 300000, version: 'studio', onEvent: push,
-    }).then((result) => { job.result = result; job.done = true; push({ kind: 'done', text: outDir }); for (const l of job.listeners) l(null); })
-      .catch((e: Error) => { job.error = e.message; job.done = true; push({ kind: 'fail', text: e.message }); for (const l of job.listeners) l(null); });
+    }).then((result) => { job.result = result; job.runId = path.basename(outDir); push({ kind: 'done', text: relHome(outDir) }); finish(); })
+      .catch((e: Error) => { job.error = e.message; push({ kind: 'fail', text: e.message }); finish(); });
     return id;
+  }
+
+  const relHome = (p: string) => p.replace(os.homedir(), '~');
+  const TMP = [fsSync.realpathSync(os.tmpdir()), os.tmpdir()];
+  const scrub = (t: string) => {
+    let out = t.split(realRoot).join('<root>').split(root).join('<root>');
+    for (const d of TMP) out = out.split(d).join('<tmp>');
+    return out.split(os.homedir()).join('~');
+  };
+
+  // Before/after: the same cases, the same models, once on the file as saved and once on the
+  // unsaved edit — in a throwaway copy, so the project is never touched. Each side is a
+  // separate `saut test` process: the TAUT engine keeps process-wide state (the pack it was
+  // pointed at), and a copy of the pack must not share it with this server.
+  async function startPair(file: string, payload: any): Promise<string> {
+    const { artifacts, harnesses, taut } = await load([file], opts);
+    const a = artifacts[0];
+    if (!a) throw new Error('no artifact at that path');
+    const p = benchParams(payload, harnesses);
+    const { id, job, push, finish } = newJob();
+    const pair = crypto.randomBytes(4).toString('hex');
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'saut-variant-'));
+    const skip = (src: string) => !/(^|\/)(\.git|node_modules)(\/|$)/.test(src);
+    let variant: string;
+    if (taut) {
+      await fs.cp(taut.packRoot, path.join(tmp, 'pack'), { recursive: true, filter: skip });
+      variant = path.join(tmp, 'pack', path.relative(taut.packRoot, a.path));
+    } else if (a.kind === 'skill') {
+      await fs.cp(a.dir, path.join(tmp, path.basename(a.dir)), { recursive: true, filter: skip });
+      variant = path.join(tmp, path.basename(a.dir), 'SKILL.md');
+    } else {
+      await fs.mkdir(path.join(tmp, 'agents'), { recursive: true });
+      variant = path.join(tmp, 'agents', path.basename(a.path));
+    }
+    await fs.writeFile(variant, payload.variantText);
+    const target = (f: string) => (a.kind === 'skill' ? path.dirname(f) : f);
+    const cli = path.join(HERE, '..', '..', 'saut.mjs');
+    const common = ['--level', String(p.level), '--runs', String(p.runs), '--harness', p.selected.map((h) => h.id).join(','),
+      ...(Object.keys(p.models).length ? ['--model', Object.entries(p.models).map(([h, m]) => `${h}=${m}`).join(',')] : []),
+      ...(p.maxCostUsd !== null ? ['--max-cost', String(p.maxCostUsd)] : []), ...(p.caseFilter ? ['--case', p.caseFilter] : []),
+      ...(taut ? ['--taut', taut.engine, ...(taut.project ? ['--deployment', taut.project.name] : [])] : []), '--pair', pair];
+    const side = async (label: 'before' | 'after', f: string) => {
+      const outDir = await newResultsDir(a, label);
+      push({ kind: 'step', text: `${label}: ${label === 'before' ? 'the file as saved' : 'your unsaved edit (a throwaway copy)'}` });
+      await new Promise<void>((resolve) => {
+        const child = spawn(process.execPath, [cli, 'test', target(f), ...common, '--label', label, '--out', outDir], { env: { ...process.env, NO_COLOR: '1' }, stdio: ['ignore', 'ignore', 'pipe'] });
+        let buf = '';
+        child.stderr.on('data', (d: Buffer) => {
+          buf += d.toString();
+          let i;
+          while ((i = buf.indexOf('\n')) >= 0) {
+            const line = buf.slice(0, i).trimEnd(); buf = buf.slice(i + 1);
+            const m = line.match(/^(\S+)\s+(.*)$/);
+            if (line) push({ kind: m?.[1] ?? 'log', text: `[${label}] ${m?.[2] ?? line}` });
+          }
+        });
+        child.on('close', () => resolve());
+      });
+      return { outDir, result: JSON.parse(await readText(path.join(outDir, 'matrix.json'))) as BenchResult };
+    };
+    (async () => {
+      try {
+        const before = await side('before', a.path);
+        const after = await side('after', variant);
+        job.result = after.result;
+        job.pair = { id: pair, before: path.basename(before.outDir), after: path.basename(after.outDir) };
+        push({ kind: 'done', text: `pair ${pair}: ${job.pair.before} → ${job.pair.after}` });
+      } catch (e) { job.error = (e as Error).message; push({ kind: 'fail', text: job.error }); }
+      finally { await fs.rm(tmp, { recursive: true, force: true }); finish(); }
+    })();
+    return id;
+  }
+
+  // The cases a bench runs: authored under evals/, else the three generated ones.
+  async function cases(file: string) {
+    const abs = resolveIn(file);
+    if (!(await contained(abs))) throw new Error('path outside the studio root');
+    const { artifacts } = await load([abs], opts);
+    const a = artifacts[0];
+    if (!a) throw new Error('no artifact at that path');
+    const { loadCases } = await import('../bench/cases.mts');
+    const list = await loadCases(a);
+    return {
+      authored: list.some((c) => c.source === 'evals'),
+      dir: relOf(evalsDir(a)),
+      cases: list.map((c) => ({ name: c.name, source: c.source, invocation: c.invocation, expect: c.expect, prompt: c.prompt, maxTurns: c.maxTurns, file: c.file ? relOf(c.file) : null })),
+    };
+  }
+  const evalsDir = (a: Artifact) => (a.kind === 'skill' ? path.join(a.dir, 'evals') : path.join(path.dirname(a.path), 'evals', a.name));
+
+  // Write one case as <evals>/<name>/prompt.md — the Claude Code plugin-eval layout the bench
+  // reads, plus SAUT's `expect` / `invocation` keys.
+  async function saveCase(payload: any) {
+    const abs = resolveIn(payload.path);
+    await writable(abs);
+    const { artifacts } = await load([abs], opts);
+    const a = artifacts[0];
+    if (!a) throw new Error('no artifact at that path');
+    const list = Array.isArray(payload.cases) ? payload.cases : [payload];
+    const written: string[] = [];
+    for (const c of list) {
+      const name = String(c.name ?? '');
+      if (!NAME.test(name)) throw new Error('a case name is lowercase letters, digits and dashes');
+      const invocation = ['explicit', 'implicit', 'control'].includes(c.invocation) ? c.invocation : 'implicit';
+      const expect = c.expect === 'no-fire' ? 'no-fire' : 'fire';
+      const maxTurns = Math.max(1, Math.min(200, Math.trunc(Number(c.maxTurns)) || 8));
+      const file = path.join(evalsDir(a), name, 'prompt.md');
+      if (!(await contained(file))) throw new Error('path outside the studio root');
+      const text = emitFrontmatter({ name, invocation, expect, max_turns: maxTurns }) + String(c.prompt ?? '').trim() + '\n';
+      await fs.mkdir(path.dirname(file), { recursive: true });
+      await writeContained(file, text, !(await exists(file)));
+      written.push(relOf(file));
+    }
+    return { written, ...(await cases(payload.path)) };
+  }
+
+  async function runs(file: string) {
+    const abs = resolveIn(file);
+    if (!(await contained(abs))) throw new Error('path outside the studio root');
+    const { artifacts } = await load([abs], opts);
+    if (!artifacts[0]) throw new Error('no artifact at that path');
+    const { listRuns } = await import('../bench/results.mts');
+    return { runs: await listRuns(artifacts[0]) };
+  }
+
+  async function runDetail(file: string, runId: string) {
+    const abs = resolveIn(file);
+    if (!(await contained(abs))) throw new Error('path outside the studio root');
+    const { artifacts } = await load([abs], opts);
+    if (!artifacts[0]) throw new Error('no artifact at that path');
+    const { readRun, summarize } = await import('../bench/results.mts');
+    const r = await readRun(artifacts[0], runId);
+    return JSON.parse(scrub(JSON.stringify({ summary: summarize(runId, r), result: { ...r, scratch: undefined, artifact: { ...r.artifact, path: relOf(r.artifact.path) } } })));
+  }
+
+  // What a bench will cost before it runs: model runs from the cases, and — where this
+  // artifact has been benched before — the average spend per run on each harness.
+  async function estimate(payload: any) {
+    const abs = resolveIn(payload.path);
+    if (!(await contained(abs))) throw new Error('path outside the studio root');
+    const { artifacts, harnesses } = await load([abs], opts);
+    const a = artifacts[0];
+    if (!a) throw new Error('no artifact at that path');
+    const p = benchParams(payload, harnesses);
+    const { loadCases } = await import('../bench/cases.mts');
+    const { plannedRuns, listRuns, readRun } = await import('../bench/results.mts');
+    const list = await loadCases(a, p.caseFilter);
+    const perRun: Record<string, number | null> = {};
+    const history = await listRuns(a);
+    for (const h of p.selected) {
+      perRun[h.id] = null;
+      for (const r of history) {
+        const row = r.harnesses.find((x) => x.harness === h.id && x.costUsd > 0);
+        if (!row) continue;
+        const full = await readRun(a, r.id).catch(() => null);
+        const traces = full?.reports.find((x) => x.harness === h.id)?.traces.length ?? 0;
+        if (traces) { perRun[h.id] = row.costUsd / traces; break; }
+      }
+    }
+    const each = plannedRuns(list, a, 1, p.runs, p.level);
+    const pairFactor = payload.pair ? 2 : 1;
+    const known = p.selected.filter((h) => perRun[h.id] !== null);
+    return {
+      cases: list.length, modelRuns: each * p.selected.length * pairFactor,
+      perHarness: p.selected.map((h) => ({ harness: h.id, runs: each * pairFactor, costPerRun: perRun[h.id] })),
+      estimateUsd: known.length ? known.reduce((n, h) => n + (perRun[h.id] ?? 0) * each * pairFactor, 0) : null,
+      unknown: p.selected.filter((h) => perRun[h.id] === null).map((h) => h.id),
+      ceiling: p.maxCostUsd,
+    };
   }
 
   const realRoot = await fs.realpath(root).catch(() => root);
@@ -439,6 +632,14 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
         return send(403, { error: 'bad or missing token' });
       if (req.method === 'GET' && pathname === '/api/context') return send(200, await context());
       if (req.method === 'GET' && pathname === '/api/overview') return send(200, await overview());
+      if (req.method === 'GET' && (pathname === '/api/cases' || pathname === '/api/runs' || pathname === '/api/run')) {
+        const p = url.searchParams.get('path') ?? '';
+        try {
+          if (pathname === '/api/cases') return send(200, await cases(p));
+          if (pathname === '/api/runs') return send(200, await runs(p));
+          return send(200, await runDetail(p, url.searchParams.get('id') ?? ''));
+        } catch (e) { return send(400, { error: (e as Error).message }); }
+      }
       if (req.method === 'GET' && pathname === '/api/artifact') {
         const p = url.searchParams.get('path') ?? '';
         try { return send(200, await passport(p)); } catch (e) { return send(400, { error: (e as Error).message }); }
@@ -452,7 +653,7 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive', 'x-content-type-options': 'nosniff' });
         const write = (e: { kind: string; text: string } | null) => {
           if (e) res.write(`data: ${JSON.stringify(e)}\n\n`);
-          else { res.write(`event: end\ndata: ${JSON.stringify({ result: job.result ?? null, error: job.error ?? null })}\n\n`); res.end(); }
+          else { res.write(`event: end\ndata: ${scrub(JSON.stringify({ result: job.result ? { ...job.result, scratch: undefined } : null, runId: job.runId ?? null, pair: job.pair ?? null, error: job.error ?? null }))}\n\n`); res.end(); }
         };
         for (const e of job.events) write(e);
         if (job.done) return write(null);
@@ -487,6 +688,8 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
           }
           if (pathname === '/api/fix') return send(200, await fix(payload));
           if (pathname === '/api/test') return send(200, { id: await startBench(payload) });
+          if (pathname === '/api/case') return send(200, await saveCase(payload));
+          if (pathname === '/api/estimate') return send(200, await estimate(payload));
           if (pathname === '/api/validate') {
             if (busy) return send(409, { error: 'another action is still running' });
             busy = true;

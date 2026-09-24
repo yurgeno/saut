@@ -7,6 +7,15 @@ versions are [semantic](https://semver.org/) and each release is tagged.
 
 ### Added
 
+- **The bench in the loop.** A model per harness (`--model claude-code=sonnet,codex=gpt-6-sol`,
+  and a model picker per harness in the Studio) recorded with every run; `--label` / `--pair`
+  name runs in a per-artifact history. The Studio's Bench view adds a cost estimate before a
+  run (model runs, and dollars from this artifact's earlier runs), a case editor that writes
+  `evals/<case>/prompt.md` (or the generated cases as files), the history, a side-by-side
+  **Compare** of two runs, and **Measure: saved vs my edit** — the same cases on the saved file
+  and on an unsaved edit in a throwaway copy, landing as a before/after pair. Class-B guidance
+  findings link to it.
+
 - **Studio, rebuilt as a workbench.** Four views: **Overview** (every skill and agent with its
   high/medium/security counts, guidance A·B·D, fixable findings and token cost, sortable and
   filterable), **Skill** (a form and the raw file in CodeMirror editors, findings re-linted on
@@ -46,7 +55,8 @@ versions are [semantic](https://semver.org/) and each release is tagged.
 
 - **Studio security contour:** the session token rides in a `<meta>`; the page runs no inline
   script (`script-src 'self'`); assets are served by name only; paths cross the API relative
-  to the root.
+  to the root. Bench events and results the page receives name `<root>`, `<tmp>` and `~`
+  instead of absolute paths.
 - **Bench results live outside the project.** `saut test` and the Studio write runs to
   `~/.saut/results/<name>--<hash>/<timestamp>/` (`$SAUT_HOME` moves the root; `--out` still
   writes one run anywhere). Traces carry full model transcripts, and a compiled workspace's

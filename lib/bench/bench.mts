@@ -8,7 +8,7 @@ import type { Artifact, HarnessCaps } from '../types.mts';
 import { loadCases } from './cases.mts';
 import { obedience } from './obedience.mts';
 import { gradeAll, loadGraders } from './graders.mts';
-import { RUNNERS, available } from './runners.mts';
+import { DEFAULT_MODEL, RUNNERS, available } from './runners.mts';
 import { cleanHarnessState, genericScratch, makeScratchRoot, tautScratch } from './scratch.mts';
 import type { BenchCase, BenchResult, RunReport, Trace } from './types.mts';
 
@@ -20,7 +20,9 @@ export interface BenchOptions {
   level: 1 | 2 | 3 | 4;
   runs: number;
   model?: string;
+  models?: Record<string, string>;   // per harness — a Claude alias means nothing to Codex
   judgeModel?: string;         // L4 LLM/baseline graders (default: a cheap tier)
+  meta?: import('./types.mts').BenchMeta;
   maxCostUsd: number | null;
   landscape: string | null;
   caseFilter?: string;
@@ -108,7 +110,7 @@ async function bench(o: BenchOptions, root: string): Promise<BenchResult> {
       for (let run = 1; run <= o.runs; run++) {
         if (exhausted) break;
         say(o, 'run', `${h.id} · ${c.name} (${c.invocation}, expect ${c.expect}) · run ${run}/${o.runs}`);
-        const trace: Trace = await runner({ harness: h, artifact: a, cwd: scratch.ws, case: c, run, model: o.model, allowedTools, timeoutMs: Math.min(o.timeoutMs, c.timeoutSeconds * 1000), rawDir });
+        const trace: Trace = await runner({ harness: h, artifact: a, cwd: scratch.ws, case: c, run, model: o.models?.[h.id] ?? o.model, allowedTools, timeoutMs: Math.min(o.timeoutMs, c.timeoutSeconds * 1000), rawDir });
         // L4: grade the scenario against this run — a scratch that still holds its files
         if (o.level >= 4 && trace.status === 'ok' && c.expect === 'fire') {
           const gs = gradersByCase.get(c.name) ?? [];
@@ -155,6 +157,8 @@ async function bench(o: BenchOptions, root: string): Promise<BenchResult> {
     startedAt,
     finishedAt: new Date().toISOString(),
     budget: { maxCostUsd: o.maxCostUsd, spentUsd: spent, exhausted },
+    models: Object.fromEntries(runnable.map((h) => [h.id, o.models?.[h.id] ?? o.model ?? DEFAULT_MODEL[h.id] ?? null])),
+    ...(o.meta ? { meta: o.meta } : {}),
   };
   await fs.mkdir(o.outDir, { recursive: true });
   await fs.writeFile(path.join(o.outDir, 'matrix.json'), JSON.stringify(result, null, 2) + '\n');

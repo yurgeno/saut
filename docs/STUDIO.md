@@ -75,11 +75,30 @@ collapse into one Overview row. Files not in the lock stay editable.
 
 ## Bench
 
-Pick the level (L1–L4), runs, cost ceiling and harnesses (the targets that have a headless
-runner), press Run, and the events stream in live over SSE; the matrix lands underneath, with a
-scenario column at L4. Runs are stored outside the project, in `~/.saut/results/` (see
-[BENCH.md](BENCH.md#output)). **Validate pack** runs the pack's own `tools/validate-pack.sh`
-(compile + verify + the SAUT step) and shows its output verbatim.
+For the artifact open in the Skill view.
+
+- **Run** — level (L1–L4), runs, cost ceiling, one case or all, and per target harness with a
+  headless runner whether to run it and on which **model** (the registry's current and previous
+  models as suggestions; empty means the cheap default). Before anything runs, the estimate says
+  how many model runs that is and — from this artifact's earlier runs — about what it costs;
+  L1 is free. The events stream in live; the matrix names the model each harness ran.
+- **Measure: saved vs my edit** — with an unsaved edit in the Skill view, the same cases,
+  harnesses and models run twice: on the file as saved and on the edit, in a throwaway copy.
+  The two land in the history as a *before/after* pair and open side by side. This is how a
+  class-B guidance change (prompt style) is meant to be made: one change, measured. A B finding
+  links here.
+- **Cases** — the cases the bench runs: authored under `evals/<case>/prompt.md`, else three
+  generated from the description. Edit one, add one, or write the generated ones as files to
+  start a suite.
+- **History** — every run of this artifact (kept outside the project, in `~/.saut/results/`),
+  newest first, with its label, level and per-harness results; open one, or select two and
+  **Compare**: per harness, fire rate, control, calls outside the allowlist, scenario score and
+  cost, with ▲/▼ for better and worse.
+- **Validate pack** runs the pack's own `tools/validate-pack.sh` (compile + verify + the SAUT
+  step) and shows its output verbatim.
+
+Paths in the bench log and in the results the page receives are shown as `<root>`, `<tmp>` and
+`~`; the page is not told where anything lives.
 
 ## Harnesses
 

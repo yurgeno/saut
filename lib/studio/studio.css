@@ -133,6 +133,18 @@ table.plain th, table.plain td { text-align: left; padding: 4px 6px; border-bott
 table.plain th { color: var(--muted); font-weight: 500; }
 .legend { font-size: 11px; color: var(--muted); margin-top: 4px; }
 
+/* bench view */
+.bench-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 560px); gap: 14px; align-items: start; }
+@media (max-width: 1100px) { .bench-grid { grid-template-columns: 1fr; } }
+select.auto { width: auto; }
+.estimate { font-size: 12px; margin: 8px 0; padding: 7px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel2); }
+.caserow { display: flex; gap: 8px; align-items: center; padding: 5px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+.caserow .p { color: var(--muted); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.runrow { display: grid; grid-template-columns: 18px 1fr auto; gap: 8px; align-items: start; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 12px; cursor: pointer; }
+.runrow:hover { background: #161c26; }
+.runrow .h { color: var(--muted); font-size: 11px; }
+.delta.up { color: var(--ok); } .delta.down { color: var(--bad); } .delta.same { color: var(--muted); }
+
 /* harnesses view */
 .harness-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 12px; }
 .harness-cards .card h3 { margin: 0 0 6px; font-size: 14px; }

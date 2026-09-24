@@ -85,6 +85,7 @@ saut cost . --budget budgets.json        # or a saut.json {"budgets": {...}} up 
 saut cost . --workspace ~/ws             # + USED: invocations from that workspace's telemetry
 
 saut test skills/dev-review --level 3 --runs 3 --max-cost 1.00
+saut test skills/dev-review --model claude-code=sonnet,codex=gpt-6-sol   # a model per harness
 saut studio .                            # the local UI
 saut tools . --live                      # spawn catalog MCP servers, ask tools/list
 ```

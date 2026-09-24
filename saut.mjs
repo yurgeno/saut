@@ -36,7 +36,7 @@ const VALUE_FLAGS = {
   '--catalog': 'catalog', '--budget': 'budget', '--taut': 'taut', '--deployment': 'deployment',
   '--scanner': 'scanner', '--workspace': 'workspace', '--since': 'since', '--until': 'until',
   '--model': 'model', '--judge-model': 'judgeModel', '--landscape': 'landscape', '--case': 'case',
-  '--out': 'out', '--only': 'only',
+  '--out': 'out', '--only': 'only', '--label': 'label', '--pair': 'pair',
 };
 const NUMBER_FLAGS = {
   '--level': { key: 'level', min: 1, max: 4, int: true },
@@ -136,7 +136,9 @@ TAUT packs (auto-detected: pack.json + skills/ or <project>/deployment.json)
 
 Bench (saut test)
   --level 1|2|3|4      cumulative (default 3; 4 = scenario graders) · --runs <n> (default 1) · --case <glob>
-  --model <id>         harness model (default cheap: claude haiku, codex gpt-6-luna)
+  --model <id>         harness model (default cheap: claude haiku, codex gpt-6-luna); per harness:
+                       --model claude-code=sonnet,codex=gpt-6-sol
+  --label <text>       a name for this run in the history (e.g. before / after); --pair <id> ties two runs
   --judge-model <id>   model for L4 llm/baseline graders (default haiku)
   --max-cost <usd>     stop when Claude-reported spend reaches this ceiling
   --landscape <dir>    TAUT: a real landscape, COPIED into the scratch (default: stub repos)

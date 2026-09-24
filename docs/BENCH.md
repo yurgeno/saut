@@ -127,7 +127,10 @@ on that case, instead of reporting a 0 % trigger rate the description cannot fix
 - Codex runs `--sandbox read-only --ephemeral`;
   opencode gets deny-by-default permissions; Claude runs `--permission-mode dontAsk` with the
   grant above and `--setting-sources project`.
-- Cheap models by default (`haiku`, `gpt-6-luna` — needs Codex CLI 0.156.1 or newer); `--model` overrides, `--max-cost <usd>`
+- Cheap models by default (`haiku`, `gpt-6-luna` — needs Codex CLI 0.156.1 or newer). `--model`
+  overrides: one id for every harness, or one per harness —
+  `--model claude-code=sonnet,codex=gpt-6-sol` (a Claude alias means nothing to Codex). The
+  model each harness ran is recorded in the result. `--max-cost <usd>`
   stops the bench when Claude-reported spend reaches the ceiling (Codex and opencode do not
   report cost — token totals are reported instead). `--judge-model` sets the L4 judge (default
   `haiku`); its cost counts against the same ceiling.
@@ -146,6 +149,12 @@ workspace's skill directories are sealed by an integrity lock. Each artifact get
 keyed by its name and a hash of its real path, so a run from the CLI and one from the Studio
 share a history. `$SAUT_HOME` moves the root (default `~/.saut`); `--out` writes one run
 anywhere. Runs from 0.6.x and earlier sit in `<artifact>/evals/results/` and are left alone.
+
+`--label <text>` names a run in that history and `--pair <id>` ties two runs together — the
+Studio's **Measure** uses them for a before/after: the same cases, harnesses and models, once on
+the file as saved and once on an unsaved edit placed in a throwaway copy of the skill (of the
+whole pack, in a TAUT pack), each side a separate `saut test` process. The project is never
+written.
 
 ## Adding a harness
 

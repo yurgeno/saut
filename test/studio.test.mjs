@@ -232,8 +232,10 @@ test('a Studio bench run lands in SAUT_HOME, never inside the project', async ()
   assert.equal(end.error, null);
   const done = events.find((e) => e.kind === 'done');
   assert.ok(done, 'the run reports where it landed');
-  assert.ok(done.text.startsWith(path.join(process.env.SAUT_HOME, 'results', 'fx-clean--')), done.text);
-  assert.ok(await fs.stat(path.join(done.text, 'matrix.json')).then(() => true, () => false), 'matrix.json written');
+  assert.match(done.text, /^<tmp>\/saut-home-[^/]+\/results\/fx-clean--[0-9a-f]{8}\/\d{4}-/, 'named without revealing where the machine keeps it');
+  const landed = path.join(process.env.SAUT_HOME, 'results', path.basename(path.dirname(done.text)), path.basename(done.text));
+  assert.ok(await fs.stat(path.join(landed, 'matrix.json')).then(() => true, () => false), 'matrix.json written under SAUT_HOME');
+  assert.ok(events.filter((e) => typeof e.text === 'string').every((e) => !e.text.includes(root) && !e.text.includes(os.tmpdir())), 'no absolute path reaches the page');
   assert.equal(await fs.stat(path.join(skillDir, 'evals', 'results')).then(() => true, () => false), false, 'nothing under the skill');
 });
 

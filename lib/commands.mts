@@ -56,6 +56,8 @@ export interface Opts {
   landscape?: string;      // TAUT: a real landscape dir, COPIED into scratch (default: stub repos)
   case?: string;           // case name glob
   out?: string;            // results dir (default $SAUT_HOME/results/<name>--<hash>/<timestamp>)
+  label?: string;          // bench: what this run is for, shown in the history
+  pair?: string;           // bench: ties a before and an after
   keep?: boolean;          // keep the scratch workspace
   timeout?: number;        // seconds per run (default 300)
   port?: number;           // studio
@@ -438,8 +440,11 @@ export async function cmdTest(opts: Opts): Promise<number> {
   const outDir = opts.out ? path.resolve(opts.out) : await newResultsDir(a);
   const log = (e: { kind: string; text: string }) => { if (!opts.json) process.stderr.write(`${e.kind === 'fail' ? c.red(e.kind.padEnd(6)) : e.kind === 'ok' ? c.green(e.kind.padEnd(6)) : c.dim(e.kind.padEnd(6))} ${e.text}\n`); };
   if (!opts.json) process.stderr.write(`${c.bold(`bench ${a.kind} ${a.name}`)} ${c.dim(`level ${level} · runs ${opts.runs ?? 1} · ${taut ? `TAUT pack ${rel(taut.packRoot)} via ${rel(taut.engine)}` : 'generic'} · harnesses ${harnesses.filter((h) => h.runner).map((h) => h.id).join(',')}`)}\n`);
+  // --model sonnet (every harness) or --model claude-code=sonnet,codex=gpt-6-sol (per harness)
+  const perHarness = opts.model?.includes('=') ? Object.fromEntries(opts.model.split(',').map((x) => x.split('=').map((s) => s.trim())).filter(([k, v]) => k && v)) : undefined;
+  const meta = opts.label || opts.pair ? { ...(opts.label ? { label: opts.label } : {}), ...(opts.pair ? { pair: opts.pair } : {}) } : undefined;
   const result = await runBench({
-    artifact: a, siblings, harnesses, taut, level, runs: opts.runs ?? 1, model: opts.model, judgeModel: opts.judgeModel, maxCostUsd: opts.maxCost ?? null,
+    artifact: a, siblings, harnesses, taut, level, runs: opts.runs ?? 1, model: perHarness ? undefined : opts.model, models: perHarness, meta, judgeModel: opts.judgeModel, maxCostUsd: opts.maxCost ?? null,
     landscape: opts.landscape ? path.resolve(opts.landscape) : null, caseFilter: opts.case, outDir, keepScratch: !!opts.keep,
     timeoutMs: (opts.timeout ?? 300) * 1000, version: VERSION, onEvent: log,
   });
