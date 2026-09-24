@@ -7,6 +7,7 @@ import { loadHarnesses } from './caps.mts';
 import { costOf, estimateTokens, overBudget, validateBudgets } from './cost.mts';
 import { lintArtifact, matrix, sortDiags, toSarif } from './lint.mts';
 import { explain } from './rules.mts';
+import { deploymentOf, guidanceStatus, lintGuidance, lintModelTiers, localCatalogs, sandboxedAgents } from './guidance.mts';
 import { applyFix, lineDiff } from './fix.mts';
 import { discoverDetailed, loadAgent } from './skill.mts';
 import { buildRegistry } from './tools.mts';
@@ -121,6 +122,9 @@ export async function load(targets: string[], opts: Opts): Promise<Loaded> {
 export async function runLint(targets: string[], opts: Opts): Promise<{ diagnostics: Diagnostic[]; artifacts: Artifact[]; harnesses: HarnessCaps[]; taut: TautContext | null; note: string | null; ignored: string[]; scanNote?: string | null; scanners?: string[] }> {
   const { artifacts, harnesses, registry, agentsByName, taut, tautFindings, note, ignored } = await load(targets, opts);
   const diagnostics: Diagnostic[] = [...tautFindings];
+  const local = await localCatalogs(harnesses);
+  const dep = taut ? await deploymentOf(taut) : null;
+  const sandboxed = sandboxedAgents(dep);
   for (const a of artifacts) {
     let ds = lintArtifact(a, { harnesses, registry, agentsByName });
     if (taut) {
@@ -128,8 +132,10 @@ export async function runLint(targets: string[], opts: Opts): Promise<{ diagnost
       ds = ds.filter((x) => !x.code.startsWith('taut-'));
       ds.push(...lintWiring(a, taut));
     }
+    ds.push(...lintGuidance(a, { harnesses, local, taut, sandboxed }));
     diagnostics.push(...ds);
   }
+  if (dep) diagnostics.push(...lintModelTiers(dep, harnesses, local));
   let scanNote: string | null = null;
   let scanners: string[] = [];
   if (opts.scan) {
@@ -236,6 +242,67 @@ async function cmdFix(opts: Opts): Promise<number> {
   if (opts.write) process.stdout.write(`\n${count(total, 'fix', 'fixes')} applied · ${count(diagnostics.length, 'finding')} before → ${after.length} after\n`);
   else if (total) process.stdout.write(c.dim(`\n${count(total, 'fix', 'fixes')} available — nothing written. --write applies the safe ones; a review fix also needs --only <rule>\n`));
   return lintExit(after, artifacts.length, opts);
+}
+
+// ---- guidance: how old the vendor guidance is, and what this machine says against it ------
+// A harness CLI's version, read the way a person would (`<bin> --version`), bounded in time.
+async function cliVersion(bin: string): Promise<string | null> {
+  const { execFile } = await import('node:child_process');
+  return new Promise((resolve) => {
+    execFile(bin, ['--version'], { timeout: 5000, maxBuffer: 64 * 1024 }, (err, out) => resolve(err ? null : (String(out).match(/\d+\.\d+\.\d+/)?.[0] ?? null)));
+  });
+}
+const older = (a: string, b: string) => {
+  const x = a.split('.').map(Number), y = b.split('.').map(Number);
+  for (let i = 0; i < 3; i++) if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) < (y[i] ?? 0);
+  return false;
+};
+
+export async function cmdGuidance(opts: Opts): Promise<number> {
+  const harnesses = [...(await loadHarnesses()).values()].filter((h) => !opts.harness?.length || opts.harness.includes(h.id));
+  const status = guidanceStatus(harnesses);
+  const local = await localCatalogs(harnesses);
+  const drift: { harness: string; kind: string; model?: string; detail: string }[] = [];
+  const clis: Record<string, string | null> = {};
+  for (const h of harnesses) {
+    if (!h.models) continue;
+    const l = local.get(h.id);
+    if (l) {
+      const reg = new Map(h.models.catalog.map((m) => [m.id, m]));
+      for (const [slug, m] of l.models) if (m.listed && !reg.has(slug))
+        drift.push({ harness: h.id, kind: 'new-in-local', model: slug, detail: `listed by the local catalog (fetched ${l.fetchedAt ?? '?'}) but unknown to the registry` });
+      for (const m of h.models.catalog) {
+        const lm = l.models.get(m.id);
+        if ((m.status === 'current' || m.status === 'previous') && !lm)
+          drift.push({ harness: h.id, kind: 'missing-in-local', model: m.id, detail: `the registry lists it as ${m.status}; the local catalog does not` });
+        else if (lm && m.efforts.length && lm.efforts.join(',') !== m.efforts.join(','))
+          drift.push({ harness: h.id, kind: 'efforts', model: m.id, detail: `effort levels: registry ${m.efforts.join(', ')} · local ${lm.efforts.join(', ')}` });
+      }
+    }
+    const bin = h.runner?.cmd[0];
+    if (bin) {
+      const v = await cliVersion(bin);
+      clis[h.id] = v;
+      if (v) for (const m of h.models.catalog) if (m.minCli && older(v, m.minCli))
+        drift.push({ harness: h.id, kind: 'cli-too-old', model: m.id, detail: `needs ${bin} ${m.minCli} or newer; this machine has ${v}` });
+    }
+  }
+  const bad = status.stale || drift.length > 0;
+  if (opts.json) {
+    process.stdout.write(JSON.stringify({ version: VERSION, status, local: Object.fromEntries([...local].map(([k, v]) => [k, v ? { file: v.file, fetchedAt: v.fetchedAt, clientVersion: v.clientVersion, models: v.models.size } : null])), clis, drift }, null, 2) + '\n');
+    return bad ? 1 : 0;
+  }
+  process.stdout.write(`${c.bold('vendor guidance')} — verified ${status.verifiedAt} (${count(status.ageDays, 'day')} ago; re-verify after ${status.maxAgeDays})${status.stale ? c.yellow(' — STALE') : c.green(' — current')}\n`);
+  for (const p of status.parts) process.stdout.write(`  ${p.stale ? c.yellow('stale ') : c.green('ok    ')} ${p.what} ${c.dim(`verified ${p.verifiedAt} · ${p.sources.length} source(s)`)}\n`);
+  for (const h of harnesses) {
+    if (!h.models) continue;
+    const l = local.get(h.id);
+    const cli = h.runner ? (clis[h.id] ? `${h.runner.cmd[0]} ${clis[h.id]}` : `${h.runner.cmd[0]} not found`) : 'no CLI';
+    process.stdout.write(`${c.bold(h.title)} ${c.dim(`· ${cli}${l ? ` · local catalog ${rel(l.file)} (fetched ${l.fetchedAt ?? '?'}, ${l.models.size} models)` : h.models.localCatalog ? ' · no local catalog' : ''}`)}\n`);
+    for (const d of drift.filter((x) => x.harness === h.id)) process.stdout.write(`  ${c.yellow(d.kind.padEnd(16))} ${d.model ?? ''} ${c.dim('— ' + d.detail)}\n`);
+  }
+  if (!drift.length) process.stdout.write(c.dim('no drift between the registry and this machine\n'));
+  return bad ? 1 : 0;
 }
 
 // ---- cost ---------------------------------------------------------------------------

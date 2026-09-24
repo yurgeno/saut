@@ -35,7 +35,12 @@ or reverting asks before it discards them.
   writes it and re-lints. The server applies only a fix the linter proposes for the file as it
   is at that moment, and refuses if the file changed since the preview; with unsaved edits in
   the form, applying is disabled. The passport is computed when the artifact opens, on save and
-  after a fix.
+  after a fix. Vendor-guidance findings (current models, effort levels, prompt style,
+  hardening) show their class — A outdated, B a hypothesis to change only against a bench,
+  D hardening — the date the data was verified and its sources.
+
+Under the title a pill says how old the vendor guidance is (amber after 60 days: run
+`saut guidance`); in a TAUT pack, the deployment's model ladder findings sit next to it.
 - *Compiled* (TAUT packs): the exact bytes the installer would write on each harness, with that
   adapter's degradations — the compiler in the authoring loop.
 - *Bench*: pick the level (L1–L4), runs, cost ceiling and harnesses, press Run, and the events

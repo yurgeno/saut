@@ -14,6 +14,9 @@ import { fileURLToPath } from 'node:url';
 process.env.SAUT_HOME = mkdtempSync(path.join(os.tmpdir(), 'saut-home-'));
 const TEST_HOME = process.env.SAUT_HOME;
 process.on('exit', () => rmSync(TEST_HOME, { recursive: true, force: true }));
+// Likewise a harness's own model catalog on this machine (Codex: $CODEX_HOME/models_cache.json):
+// the suite judges models against the registry alone unless a test plants a catalog itself.
+process.env.CODEX_HOME = path.join(TEST_HOME, 'codex-home');
 
 export const run = promisify(execFile);
 export const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));

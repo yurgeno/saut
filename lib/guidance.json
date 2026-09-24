@@ -1,0 +1,36 @@
+{
+  "$comment": "Vendor guidance SAUT checks against — data with a date and a source per rule, never prose in code. Class A: outdated (fix it); B: a prompt-level hypothesis (change only with a before/after bench — vendors themselves say so); D: security hardening. Model catalogs live in lib/harnesses/<id>.json under `models`, with their own verifiedAt. Re-verify when older than maxAgeDays.",
+  "maxAgeDays": 60,
+  "rules": {
+    "model-unknown": { "class": "A", "verifiedAt": "harness", "sources": ["harness"] },
+    "model-unsupported": { "class": "A", "verifiedAt": "harness", "sources": ["harness"] },
+    "model-previous": { "class": "A", "verifiedAt": "harness", "sources": ["harness"] },
+    "effort-unsupported": { "class": "A", "verifiedAt": "harness", "sources": ["harness"] },
+    "body-over-spec": {
+      "class": "A", "verifiedAt": "2026-09-23",
+      "sources": ["https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices", "https://agentskills.io/specification"]
+    },
+    "aggressive-imperative": {
+      "class": "B", "verifiedAt": "2026-09-23",
+      "appliesTo": "Claude Opus 5.5, Sonnet 5, Fable 5.x; GPT-6 Astra",
+      "sources": [
+        "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices",
+        "https://github.com/anthropics/skills/blob/main/skills/claude-api/shared/prompt-audit.md",
+        "https://developers.openai.com/api/docs/guides/latest-model/gpt-6-astra.md#prompting-best-practices"
+      ]
+    },
+    "incident-fossil": {
+      "class": "B", "verifiedAt": "2026-09-23",
+      "sources": ["https://github.com/anthropics/skills/blob/main/skills/claude-api/shared/prompt-audit.md"]
+    },
+    "reasoning-echo": {
+      "class": "B", "verifiedAt": "2026-09-23",
+      "appliesTo": "Claude Fable 5.x, Opus 5.5",
+      "sources": ["https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5-5"]
+    },
+    "codex-agent-sandbox": {
+      "class": "D", "verifiedAt": "2026-09-23",
+      "sources": ["https://learn.chatgpt.com/docs/agent-configuration/subagents", "https://learn.chatgpt.com/docs/permissions"]
+    }
+  }
+}

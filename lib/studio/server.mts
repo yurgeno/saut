@@ -27,6 +27,7 @@ import { costOf, overBudget } from '../cost.mts';
 import { emitFrontmatter } from '../frontmatter.mts';
 import { lintArtifact, matrix, sortDiags } from '../lint.mts';
 import { explain } from '../rules.mts';
+import { deploymentOf, guidanceStatus, lintGuidance, lintModelTiers, localCatalogs, sandboxedAgents } from '../guidance.mts';
 import { applyFix, lineDiff } from '../fix.mts';
 import type { Artifact, Diagnostic } from '../types.mts';
 import { exists, readText } from '../util.mts';
@@ -78,6 +79,12 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
       })),
       tools: { builtin: registry.builtin, servers: registry.servers },
       artifacts: artifacts.map((a) => ({ kind: a.kind, name: a.name, path: a.path, description: a.description })),
+      // how old the vendor guidance is, and what the pack's own model ladder says against it
+      guidance: guidanceStatus(harnesses),
+      packFindings: await (async () => {
+        const dep = taut ? await deploymentOf(taut) : null;
+        return dep ? sortDiags(explain(lintModelTiers(dep, harnesses, await localCatalogs(harnesses)))) : [];
+      })(),
     };
   }
 
@@ -96,6 +103,8 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
       const r = await refine(a, taut);
       findings.push(...r.findings, ...lintWiring(r.artifact, taut));
     }
+    const dep = taut ? await deploymentOf(taut) : null;
+    findings.push(...lintGuidance(a, { harnesses, local: await localCatalogs(harnesses), taut, sandboxed: sandboxedAgents(dep) }));
     const cost = await costOf(a, { harness: harnesses.find((h) => h.id === 'claude-code') ?? null, exact: false, agentsByName: agentsByName as Map<string, Artifact> });
     const compiled = taut ? (await previews(a, taut)).map((p) => ({ harness: p.harness, id: p.id, bytes: p.bytes, transform: p.transform, degradations: p.degradations, content: p.content.slice(0, 200000) })) : [];
     return {

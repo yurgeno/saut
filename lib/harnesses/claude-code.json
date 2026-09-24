@@ -129,5 +129,151 @@
       "id": "CC-MCP-PAREN",
       "text": "`mcp__*` rules with parentheses are skipped when loaded from settings files (use --disallowedTools for parameter matches)"
     }
-  ]
+  ],
+  "models": {
+    "verifiedAt": "2026-09-24",
+    "sources": [
+      "https://code.claude.com/docs/en/model-config",
+      "https://code.claude.com/docs/en/sub-agents"
+    ],
+    "note": "Alias resolution is the Anthropic API one; on Bedrock, Vertex, Foundry and the AWS platform `opus`/`sonnet` can resolve to older models (model-config). `model:` and `effort:` are honoured in skill and subagent frontmatter.",
+    "efforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+    ],
+    "aliases": {
+      "opus": "claude-opus-5-5",
+      "sonnet": "claude-sonnet-5",
+      "haiku": "claude-haiku-4-5",
+      "fable": "claude-fable-5-1",
+      "opus[1m]": "claude-opus-5-5",
+      "sonnet[1m]": "claude-sonnet-5",
+      "best": null,
+      "default": null,
+      "opusplan": null,
+      "inherit": null
+    },
+    "catalog": [
+      {
+        "id": "claude-fable-5-1",
+        "status": "current",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      {
+        "id": "claude-opus-5-5",
+        "status": "current",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "defaultEffort": "medium"
+      },
+      {
+        "id": "claude-sonnet-5",
+        "status": "current",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      {
+        "id": "claude-haiku-4-5",
+        "status": "current",
+        "efforts": [],
+        "note": "no effort levels — an effort setting has no effect"
+      },
+      {
+        "id": "claude-fable-5",
+        "status": "previous",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "replacement": "fable"
+      },
+      {
+        "id": "claude-opus-5",
+        "status": "previous",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "replacement": "opus"
+      },
+      {
+        "id": "claude-opus-4-8",
+        "status": "previous",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "replacement": "opus"
+      },
+      {
+        "id": "claude-opus-4-7",
+        "status": "previous",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "defaultEffort": "xhigh",
+        "replacement": "opus"
+      },
+      {
+        "id": "claude-opus-4-6",
+        "status": "previous",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "max"
+        ],
+        "replacement": "opus"
+      },
+      {
+        "id": "claude-sonnet-4-6",
+        "status": "previous",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "max"
+        ],
+        "replacement": "sonnet"
+      },
+      {
+        "id": "claude-sonnet-4-5",
+        "status": "previous",
+        "efforts": [],
+        "replacement": "sonnet"
+      }
+    ]
+  }
 }

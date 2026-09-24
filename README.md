@@ -27,6 +27,7 @@ saut studio [dir]                the local UI over all of it
 saut passport <…>                lint + cost + matrix (+ compiled previews) as one JSON
 saut preview <name> [dir]        TAUT packs: the compiled bytes of one artifact per harness
 saut harnesses                   what each harness enforces, degrades, and lists
+saut guidance                    how old the vendor guidance is; where this machine disagrees
 saut tools [dir] [--live]        the tool names an allowlist may cite
 ```
 

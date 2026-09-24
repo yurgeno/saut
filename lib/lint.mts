@@ -57,6 +57,11 @@ function bodyLine(a: Artifact, re: RegExp): number | undefined {
 // Current names for tools older harness versions called otherwise.
 const LEGACY_REPLACEMENT: Record<string, string> = { MultiEdit: 'Edit', LS: 'Glob', NotebookRead: 'Read', Task: 'Agent', SlashCommand: 'Skill' };
 
+// Does the artifact promise read-only — in its description, or at the top of its body?
+export function claimsReadOnlyOf(a: Artifact): boolean {
+  return READONLY_CLAIM_DESC.test(a.description) || READONLY_CLAIM_BODY.test(a.body.slice(0, 2500));
+}
+
 function isWriteRef(t: ToolRef): boolean {
   if (t.mcp) return !!t.mcp.tool && WRITE_MCP.test(t.mcp.tool);
   return WRITE_TOOLS.has(t.base);
@@ -76,7 +81,7 @@ export function lintArtifact(a: Artifact, o: LintOptions): Diagnostic[] {
   const listKey = a.kind === 'skill' ? 'allowed-tools' : 'tools';
   const listLine = a.fm.lines[listKey];
   const mentions = bodyToolMentions(a.body, builtinsAll);
-  const claimsReadOnly = READONLY_CLAIM_DESC.test(a.description) || READONLY_CLAIM_BODY.test(a.body.slice(0, 2500));
+  const claimsReadOnly = claimsReadOnlyOf(a);
 
   if (!a.name) out.push(d(a, 'missing-name', 'high', 'frontmatter has no `name`'));
   if (!a.description) out.push(d(a, 'missing-description', 'high', 'frontmatter has no `description` — the harness cannot route to this artifact'));

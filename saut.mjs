@@ -26,7 +26,7 @@ if (nodeMajor < 24) {
 }
 
 const { SautError } = await import('./lib/util.mts');
-const { VERSION, cmdCost, cmdHarnesses, cmdLint, cmdPassport, cmdPreview, cmdStudio, cmdTest, cmdTools } = await import('./lib/commands.mts');
+const { VERSION, cmdCost, cmdGuidance, cmdHarnesses, cmdLint, cmdPassport, cmdPreview, cmdStudio, cmdTest, cmdTools } = await import('./lib/commands.mts');
 
 // Flags are declared, not hand-rolled per branch: a missing value, a non-numeric value or a
 // number out of range is a USAGE error (exit 2) with a message naming the flag — never an
@@ -100,6 +100,8 @@ Commands
   cost [paths…]        token passport: always-on (listing) / on-invoke (body + wired agents)
   passport [paths…]    lint + cost + harness matrix as one JSON document
   harnesses            the capability registry (what each harness enforces / degrades)
+  guidance             how old the vendor guidance (models, effort, prompting) is, and where this
+                       machine's harness CLIs and model catalogs disagree with it (exit 1 if so)
   tools [dir]          the tool registry: builtin per harness + MCP catalog (+ --live)
   studio [dir]         the local UI over all of the above: form + editor, passport, bench, publish
   preview <name> [dir] TAUT packs: the compiled bytes of one skill/agent per harness (engine render)
@@ -153,7 +155,7 @@ Exit codes: 0 clean/within budget/bench passed · 1 findings/over budget/bench f
 
 const opts = parseArgs(process.argv.slice(2));
 const cmd = opts._.shift();
-const table = { lint: cmdLint, cost: cmdCost, passport: cmdPassport, preview: cmdPreview, test: cmdTest, studio: cmdStudio, harnesses: cmdHarnesses, tools: cmdTools };
+const table = { lint: cmdLint, cost: cmdCost, passport: cmdPassport, preview: cmdPreview, test: cmdTest, studio: cmdStudio, harnesses: cmdHarnesses, tools: cmdTools, guidance: cmdGuidance };
 // Writes to a pipe are asynchronous: process.exit() right after a large write cuts the output
 // at the pipe buffer (64 KB) — `saut lint --json | jq` got half a document. An empty write's
 // callback fires once everything queued before it has been handed to the OS.

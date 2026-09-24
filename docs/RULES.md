@@ -45,6 +45,36 @@ harness, what the declared allowlist actually is there — `restrict`, `grant`, 
 | `frontmatter-syntax` / `no-frontmatter` | high | the frontmatter cannot be parsed (unterminated list, anchors, continuation lines…) | — |
 | `duplicate-key` | info | a top-level key appears more than once — capability-marker branches; allowlists are read as the union, the first description wins | TAUT markers |
 
+## Current guidance (harness and model)
+
+What the vendors recommend moves faster than a linter release, so this layer is **data with a
+date and a source**: the model catalogs sit in `lib/harnesses/<id>.json` under `models`
+(aliases, ids, status, effort levels per model, replacements), the prompting guidance in
+`lib/guidance.json`. Every finding carries its class, the date the data was verified and the
+sources; `saut guidance` says how old the data is (stale after 60 days) and where this machine
+disagrees with it. Where a harness keeps its own catalog locally — Codex:
+`$CODEX_HOME/models_cache.json` — that fresher evidence is consulted first.
+
+Classes: **A** outdated (fix it) · **B** a prompt-level hypothesis — both vendors say to change
+prompts only against a measurement, so B never carries an autofix; change it with a bench
+before and after · **D** a hardening the artifact does not use yet.
+
+| rule | class | severity | fires when | source |
+|---|---|---|---|---|
+| `model-unsupported` | A | high | the model is marked unsupported or retired — runs pinned to it fail | harness catalog; measured 2026-09-23 (`gpt-5.6` → HTTP 400) |
+| `model-unknown` | A | medium | neither the registry nor the local catalog knows the model — a typo, or newer than the registry | harness catalog |
+| `model-previous` | A | low | a pinned previous or legacy model; names the current one (review autofix: set `model`) | harness catalog |
+| `effort-unsupported` | A | medium | an effort level the harness does not know, or one the model does not take (Haiku takes none; Opus 4.6 has no `xhigh`) | Claude Code model-config; Codex catalog |
+| `body-over-spec` | A | medium | a SKILL.md body over 500 lines | Agent Skills best practices |
+| `aggressive-imperative` | B | low | an undertrigger-era instruction ("use PROACTIVELY", "unprompted", "if in doubt, use") or ≥ 5 all-caps imperatives at ≥ 3 per 1,000 words of prose (thresholds calibrated on one production pack) | Claude prompting best practices, prompt audit; GPT-6 prompting guide |
+| `incident-fossil` | B | low | two or more dated incident/measurement stories in the body | prompt audit |
+| `reasoning-echo` | B | low | asks the model to show its reasoning process or chain of thought (a verdict with its justification is fine) | prompting Claude Opus 5.5 |
+| `codex-agent-sandbox` | D | info | a read-only agent whose tools list Codex drops, with no read-only sandbox declared (TAUT: `manifest.agentSandbox`) | Codex subagents, permissions |
+
+In a TAUT pack the deployment's `modelTiers` ladder is checked too, anchored to the line in
+`deployment.json`. Fenced code is not prose: commands and examples do not count toward the
+prompt-style rules.
+
 ## TAUT wiring
 
 Plain mode (no engine) checks the shape against whatever catalog and agents were discovered;

@@ -12,7 +12,7 @@ export interface RuleInfo { category: RuleCategory; title: string; why: string; 
 const DOC = 'https://github.com/yurgeno/saut/blob/master/docs/RULES.md';
 const SECTION: Record<RuleCategory, string> = {
   privileges: 'privileges', security: 'safety', hygiene: 'hygiene-and-cost', syntax: 'hygiene-and-cost',
-  taut: 'taut-wiring', scanner: 'rented-content-scanning',
+  taut: 'taut-wiring', scanner: 'rented-content-scanning', guidance: 'current-guidance-harness-and-model',
 };
 
 export const RULES: Record<string, RuleInfo> = {
@@ -150,6 +150,53 @@ export const RULES: Record<string, RuleInfo> = {
     category: 'syntax', title: 'File could not be read',
     why: 'An unreadable artifact is invisible to every check.',
     fix: 'Check permissions and encoding; the message names the error.',
+  },
+
+  // ---- current guidance (harness and model) ---------------------------------------------
+  'model-unsupported': {
+    category: 'guidance', title: 'Model is not offered any more',
+    why: 'The harness refuses or has retired this model; every run pinned to it fails before it starts.',
+    fix: 'Pin the replacement named in the finding (or an alias such as `opus`/`sonnet` that follows the current model).',
+  },
+  'model-unknown': {
+    category: 'guidance', title: 'Unknown model',
+    why: 'A model name the harness does not recognise fails at run time or silently falls back to a default.',
+    fix: 'Check the spelling against the harness model list; if the model is newer than SAUT\'s registry, the registry needs re-verifying.',
+  },
+  'model-previous': {
+    category: 'guidance', title: 'Pinned to a previous model',
+    why: 'A pinned older model keeps working until it is retired, but misses what the current one does better — and the retirement arrives as a failure.',
+    fix: 'Move to the current model named in the finding, or pin an alias that follows the family. Re-run the bench before and after: behaviour can shift.',
+  },
+  'effort-unsupported': {
+    category: 'guidance', title: 'Effort level the model does not take',
+    why: 'An effort the model does not support is ignored or rejected; the author believes a setting is in force that is not.',
+    fix: 'Use a level the model lists, or remove `effort` for a model that takes none (e.g. Haiku).',
+  },
+  'body-over-spec': {
+    category: 'guidance', title: 'Skill body over 500 lines',
+    why: 'The skill guidance keeps SKILL.md short; a long body costs every invocation and buries the steps.',
+    fix: 'Move reference material into files next to SKILL.md and link them; keep the procedure in the body.',
+  },
+  'aggressive-imperative': {
+    category: 'guidance', title: 'Aggressive imperatives for current models', heuristic: true,
+    why: 'Current models follow instructions closely; wording from the undertrigger era ("use PROACTIVELY", "UNPROMPTED", dense MUST/NEVER) now causes over-triggering and over-compliance.',
+    fix: 'Keep the reason, soften the imperative ("check current docs when a library API\'s version matters"). Keep motivated prohibitions and hard gates verbatim.',
+  },
+  'incident-fossil': {
+    category: 'guidance', title: 'Incident stories in the body', heuristic: true,
+    why: 'Dated incident and measurement stories are paid on every invocation and read as extra rules; the guidance calls them fossils.',
+    fix: 'Keep one line of "why" per rule and move the story to a changelog or design note the body links to.',
+  },
+  'reasoning-echo': {
+    category: 'guidance', title: 'Asks the model to reproduce its reasoning', heuristic: true,
+    why: 'Asking current Claude models to reproduce their internal reasoning can trigger a refusal; a justification of the verdict is fine.',
+    fix: 'Ask for the conclusion and the evidence behind it, not for the reasoning process.',
+  },
+  'codex-agent-sandbox': {
+    category: 'guidance', title: 'Read-only agent without a Codex sandbox', heuristic: true,
+    why: 'Codex drops an agent\'s tools list, so a read-only promise holds on prose alone there.',
+    fix: 'If the agent needs neither writes nor the network, run it with `sandbox_mode = "read-only"` (in a TAUT pack: `manifest.agentSandbox`). A read-only sandbox also blocks the network.',
   },
 
   // ---- TAUT wiring ---------------------------------------------------------------------

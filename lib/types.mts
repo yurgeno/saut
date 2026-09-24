@@ -23,9 +23,34 @@ export interface Diagnostic {
   fix?: string;            // what to do about it
   doc?: string;            // where the rule is documented
   heuristic?: boolean;     // the rule reads prose/patterns and can be wrong for this artifact
+  guidance?: GuidanceMark; // a vendor-guidance finding: its class, when it was verified, from where
 }
 
-export type RuleCategory = 'security' | 'privileges' | 'hygiene' | 'syntax' | 'taut' | 'scanner';
+export type RuleCategory = 'security' | 'privileges' | 'hygiene' | 'syntax' | 'taut' | 'scanner' | 'guidance';
+
+// A: outdated (fix it) · B: a prompt-level hypothesis (change only against a before/after
+// bench) · D: a hardening the artifact does not use yet.
+export interface GuidanceMark { class: 'A' | 'B' | 'D'; verifiedAt: string; sources: string[]; appliesTo?: string }
+
+export interface ModelEntry {
+  id: string;
+  status: 'current' | 'previous' | 'legacy' | 'unsupported' | 'retired';
+  efforts: string[];                    // [] = the model takes no effort level
+  defaultEffort?: string;
+  replacement?: string;
+  minCli?: string;
+  note?: string;
+}
+
+export interface ModelRegistry {
+  verifiedAt: string;                   // YYYY-MM-DD — stale after lib/guidance.json maxAgeDays
+  sources: string[];
+  note?: string;
+  efforts: string[];                    // every level the harness knows
+  aliases: Record<string, string | null>;   // null = resolved at run time (inherit, default…)
+  catalog: ModelEntry[];
+  localCatalog?: { homeEnv: string; homeDefault: string; file: string; format: 'codex-models-cache' };
+}
 
 // A frontmatter edit, applied to the file text by fix.mts (never by re-emitting the block).
 // `safe`: purely mechanical, behaviour-preserving (a renamed tool, an unreachable skill made
@@ -123,6 +148,7 @@ export interface HarnessCaps {
   listing: { budget: string; descCap: number | null; note: string };
   runner: HarnessRunner | null;         // null = registry-only (no headless runner yet)
   degradations: { id: string; text: string }[];
+  models?: ModelRegistry;               // what the harness can run, dated and sourced
 }
 
 // ---- tool registry --------------------------------------------------------------------

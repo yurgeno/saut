@@ -7,6 +7,18 @@ versions are [semantic](https://semver.org/) and each release is tagged.
 
 ### Added
 
+- **Current vendor guidance, dated and sourced.** Model catalogs per harness (Claude Code:
+  aliases, ids, effort levels per model; Codex: the same, plus the harness's own catalog on the
+  machine, read first) and the current prompting guidance are data with a verification date
+  and sources. New rules: `model-unsupported`, `model-unknown`, `model-previous`,
+  `effort-unsupported`, `body-over-spec` (class A — outdated), `aggressive-imperative`,
+  `incident-fossil`, `reasoning-echo` (class B — change only against a bench; never an
+  autofix), `codex-agent-sandbox` (class D — hardening). In a TAUT pack the deployment's
+  `modelTiers` ladder is checked too; run against the pack as it was before 2026-09-23 it
+  reports the `gpt-5.6` pin that failed every Codex session.
+- **`saut guidance`** — how old that data is (stale after 60 days) and where this machine's
+  harness CLIs and model catalogs disagree with it; exit 1 if stale or drifting.
+
 - **Every finding says how to fix it.** A rule catalog gives each code a title, why it matters
   and what to do; the CLI prints the advice under the finding, `--json` and the Studio carry
   it, SARIF fills the rule's `fullDescription`, `help` and `helpUri`. Findings about the body

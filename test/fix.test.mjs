@@ -14,7 +14,7 @@ import { PACK, REPO, saut } from './helpers.mjs';
 const fm = (lines) => ['---', ...lines, '---', '# body', ''].join('\n');
 
 test('catalog: every code the sources can emit is explained, and RULES.md documents the same set', async () => {
-  const src = (await Promise.all(['lint.mts', 'frontmatter.mts', 'skill.mts', 'adapters/taut.mts'].map((f) => fs.readFile(path.join(REPO, 'lib', f), 'utf8')))).join('\n');
+  const src = (await Promise.all(['lint.mts', 'frontmatter.mts', 'skill.mts', 'adapters/taut.mts', 'guidance.mts'].map((f) => fs.readFile(path.join(REPO, 'lib', f), 'utf8')))).join('\n');
   const emitted = new Set([
     ...[...src.matchAll(/\bd\(a, '([a-z0-9-]+)'/g)].map((m) => m[1]),
     ...[...src.matchAll(/\bd\('([a-z0-9-]+)'/g)].map((m) => m[1]),
