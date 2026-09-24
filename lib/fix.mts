@@ -9,12 +9,21 @@ import { parseFrontmatter } from './frontmatter.mts';
 
 export interface FixResult { ok: boolean; text: string; reason?: string }
 
-interface Block { start: number; end: number }    // line indexes of the opening and closing `---`
+interface Block { start: number; end: number }    // line indexes of the opening and closing fence
 
-function frontmatterBlock(lines: string[]): Block | null {
-  if (lines[0]?.trimEnd() !== '---') return null;
-  for (let i = 1; i < lines.length; i++) if (lines[i].trimEnd() === '---') return { start: 0, end: i };
+// The same fences the parser accepts: `---` opens, `---` or `...` closes. Anything else here
+// would edit a line the parser reads as body.
+export function frontmatterBlock(lines: string[]): Block | null {
+  if (lines[0] !== '---') return null;
+  for (let i = 1; i < lines.length; i++) if (lines[i] === '---' || lines[i] === '...') return { start: 0, end: i };
   return null;
+}
+
+// A file's line ending: the one most of its lines use (a single stray CRLF does not convert
+// the whole file).
+export function eolOf(text: string): string {
+  const crlf = (text.match(/\r\n/g) ?? []).length, lf = (text.match(/\n/g) ?? []).length - crlf;
+  return crlf > lf ? '\r\n' : '\n';
 }
 
 const keyLine = (key: string) => new RegExp(`^${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:(?:\\s(.*))?$`);
@@ -73,13 +82,29 @@ function writeList(lines: string[], at: number, key: string, shape: 'flow' | 'pl
   lines[at] = shape === 'flow' ? `${key}: [${items.join(', ')}]` : `${key}: ${items.join(', ')}`;
 }
 
+// A NEW list item as YAML text: bare when it reads back as itself, else quoted. The entries
+// already in the file keep their own text — quotes and all.
+function itemText(x: string): string {
+  return /^[A-Za-z0-9_*(]/.test(x) && !/[,[\]{}#"'`]|\s$|:\s/.test(x) ? x : JSON.stringify(x);
+}
+
+// The list a key line (and its indented continuation) reads as — the check that an edit
+// changed exactly the entry it meant to.
+function listValue(lines: string[], at: number, key: string): string[] | null {
+  const own = [lines[at]];
+  for (let j = at + 1; j < lines.length && /^\s+\S/.test(lines[j]); j++) own.push(lines[j]);
+  const v = parseFrontmatter(['---', ...own, '---', ''].join('\n'), 'fix').data[key];
+  return Array.isArray(v) ? v.map(String) : typeof v === 'string' ? splitItems(v).map(bare) : null;
+}
+const sameList = (a: string[] | null, b: string[]) => !!a && a.length === b.length && a.every((x, i) => x === b[i]);
+
 function scalarText(v: boolean | string): string {
   if (typeof v === 'boolean') return String(v);
   return /^[A-Za-z0-9_.\-/ ]+$/.test(v) && !/^(true|false|null|~|-?\d+(\.\d+)?)$/.test(v) ? v : JSON.stringify(v);
 }
 
 export function applyFix(text: string, fix: Autofix): FixResult {
-  const eol = text.includes('\r\n') ? '\r\n' : '\n';
+  const eol = eolOf(text);
   const lines = text.split(/\r?\n/);
   const b = frontmatterBlock(lines);
   if (!b) return { ok: false, text, reason: 'no frontmatter block' };
@@ -95,7 +120,8 @@ export function applyFix(text: string, fix: Autofix): FixResult {
       }
     } else lines.splice(b.end, 0, `${fix.key}: ${value}`);
   } else if (fix.op === 'list-add' && !at.length) {
-    lines.splice(b.end, 0, `${fix.key}: ${fix.items.join(', ')}`);
+    const plain = fix.items.every((x) => itemText(x) === x);
+    lines.splice(b.end, 0, plain ? `${fix.key}: ${fix.items.join(', ')}` : `${fix.key}: [${fix.items.map(itemText).join(', ')}]`);
   } else {
     if (!at.length) return refuse(`no \`${fix.key}\` key`);
     let touched = false;
@@ -106,29 +132,47 @@ export function applyFix(text: string, fix: Autofix): FixResult {
       if (shape.kind === 'block') {
         const indent = lines[shape.lines[0]].match(/^(\s*)-/)![1];
         const present = shape.lines.map((l) => bare(lines[l].replace(/^\s*-\s*/, '')));
+        let next = present;
         if (fix.op === 'list-add') {
           const add = fix.items.filter((x) => !present.includes(x));
-          lines.splice(shape.lines.at(-1)! + 1, 0, ...add.map((x) => `${indent}- ${x}`));
-          touched ||= add.length > 0;
-          continue;
+          lines.splice(shape.lines.at(-1)! + 1, 0, ...add.map((x) => `${indent}- ${itemText(x)}`));
+          next = [...present, ...add];
+          if (!add.length) continue;
+        } else {
+          const k = present.indexOf(fix.item);
+          if (k < 0) continue;
+          if (fix.op === 'list-remove') {
+            if (shape.lines.length === 1) return refuse(`removing "${fix.item}" would leave \`${fix.key}\` empty`);
+            lines.splice(shape.lines[k], 1);
+            next = present.filter((_, x) => x !== k);
+          } else {
+            lines[shape.lines[k]] = `${indent}- ${itemText(fix.with)}`;
+            next = present.map((x, j) => (j === k ? fix.with : x));
+          }
         }
-        const hit = shape.lines.find((_, k) => present[k] === fix.item);
-        if (hit === undefined) continue;
-        if (fix.op === 'list-remove') {
-          if (shape.lines.length === 1) return refuse(`removing "${fix.item}" would leave \`${fix.key}\` empty`);
-          lines.splice(hit, 1);
-        } else lines[hit] = `${indent}- ${fix.with}`;
+        if (!sameList(listValue(lines, i, fix.key), next)) return refuse(`\`${fix.key}\` would not read back as intended — edit it by hand`);
         touched = true;
         continue;
       }
-      const items = shape.items.map(bare);
-      let next = items;
-      if (fix.op === 'list-add') next = [...items, ...fix.items.filter((x) => !items.includes(x))];
-      else if (fix.op === 'list-remove') next = items.filter((x) => x !== fix.item);
-      else next = items.map((x) => (x === fix.item ? fix.with : x));
+      // flow `[a, b]` or plain `a, b`: the entries the edit does not touch keep their text
+      const raw = shape.items, items = raw.map(bare);
+      let next = items, nextRaw = raw;
+      const text = (x: string): string | null => shape.kind === 'flow' ? itemText(x) : x.includes(',') ? null : x;
+      if (fix.op === 'list-add') {
+        const add = fix.items.filter((x) => !items.includes(x));
+        if (add.some((x) => text(x) === null)) return refuse(`\`${fix.key}\` is a plain string; an entry with a comma cannot be added to it`);
+        next = [...items, ...add]; nextRaw = [...raw, ...add.map((x) => text(x)!)];
+      } else if (fix.op === 'list-remove') {
+        const keep = items.map((x) => x !== fix.item);
+        next = items.filter((_, k) => keep[k]); nextRaw = raw.filter((_, k) => keep[k]);
+      } else {
+        if (items.includes(fix.item) && text(fix.with) === null) return refuse(`\`${fix.key}\` is a plain string; an entry with a comma cannot be written into it`);
+        next = items.map((x) => (x === fix.item ? fix.with : x)); nextRaw = raw.map((r, k) => (items[k] === fix.item ? text(fix.with)! : r));
+      }
       if (next.join('\u0000') === items.join('\u0000')) continue;
       if (!next.length) return refuse(`removing "${(fix as { item: string }).item}" would leave \`${fix.key}\` empty`);
-      writeList(lines, i, fix.key, shape.kind, next);
+      writeList(lines, i, fix.key, shape.kind, nextRaw);
+      if (!sameList(listValue(lines, i, fix.key), next)) return refuse(`\`${fix.key}\` would not read back as intended — edit it by hand`);
       touched = true;
     }
     if (!touched) return refuse(fix.op === 'list-add' ? 'already present' : `"${fix.item}" is not in \`${fix.key}\``);

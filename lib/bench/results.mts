@@ -13,8 +13,10 @@ export function resultsHome(): string {
   return path.join(process.env.SAUT_HOME || path.join(os.homedir(), '.saut'), 'results');
 }
 
+// 2026-09-24T11-38-27-123[-suffix]: sortable, and to the millisecond so two runs started in
+// the same second do not share a directory.
 export function runStamp(d = new Date(), suffix = ''): string {
-  return d.toISOString().replace(/[:.]/g, '-').slice(0, 19) + (suffix ? `-${suffix}` : '');
+  return d.toISOString().replace(/[:.]/g, '-').slice(0, 23) + (suffix ? `-${suffix}` : '');
 }
 
 // <home>/<name>--<8 hex of the artifact's real path>
@@ -25,8 +27,14 @@ export async function artifactResultsRoot(a: Artifact): Promise<string> {
   return path.join(resultsHome(), `${name}--${hash}`);
 }
 
+// The directory is created here, exclusively: a run never writes into another run's.
 export async function newResultsDir(a: Artifact, suffix = ''): Promise<string> {
-  return path.join(await artifactResultsRoot(a), runStamp(new Date(), suffix));
+  const root = await artifactResultsRoot(a);
+  await fs.mkdir(root, { recursive: true });
+  for (let i = 0; ; i++) {
+    const dir = path.join(root, runStamp(new Date(), [i ? crypto.randomBytes(2).toString('hex') : '', suffix].filter(Boolean).join('-')));
+    try { await fs.mkdir(dir); return dir; } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'EEXIST' || i > 8) throw e; }
+  }
 }
 
 // ---- history -----------------------------------------------------------------------------

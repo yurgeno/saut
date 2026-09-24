@@ -182,8 +182,9 @@ guidance, each checked and re-linted before you apply it to the editor. **Bench*
 the events streaming live and measures an edit before and after; **Harnesses** is the registry as
 reference. A compiled TAUT workspace opens read-only, naming the pack source.
 
-Loopback only, per-session token in a custom header, no inline scripts, Origin and Host checks,
-writes contained under the root — the same contour as the TAUT panel. Details:
+Loopback only, a one-time key in the printed address, a per-session token in a custom header,
+no inline scripts, Origin and Host checks, reads and writes limited to skill and agent files
+under the root, atomic saves — the same contour as the TAUT panel. Details:
 [docs/STUDIO.md](docs/STUDIO.md).
 
 ## TAUT packs

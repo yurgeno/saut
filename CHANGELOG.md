@@ -110,6 +110,70 @@ versions are [semantic](https://semver.org/) and each release is tagged.
 - `saut --help` named the old results directory and the retired `gpt-5.4-mini` bench default.
 - `injection-heuristic` flagged prose as a credential read when `echo` and `.env` merely shared a line ("never echo credentials … fill `.taut/local.env`"); the file must now be the command's argument.
 
+#### Enterprise review (2026-09-24)
+
+Security:
+- **A before/after bench could write the edit into the project.** The throwaway copy kept a
+  symlinked `SKILL.md` (or skill directory) as a link back into the project, and the variant
+  was written through it. The copy now holds files, never links, and the variant is created
+  exclusively inside it.
+- **A model name could reach a harness CLI as a flag** (`--auto` to opencode) — from the
+  Studio's model picker, a case file's `model:` or `--model`. Model ids are validated
+  everywhere (`MODEL_ID`); a case with a flag-shaped model fails loudly.
+- **The page — and so the API token — was served to any local process that found the port.**
+  `saut studio` now prints an address with a one-time key; the browser trades it for an
+  `HttpOnly`, `SameSite=Strict` cookie. The token is accepted in a query only by the event
+  stream.
+- **Any `.md` under the root could be read and written** through the Studio (a `CLAUDE.md`, a
+  command file; `/api/compose` would also show any file as a diff). Every route now takes only
+  a skill's `SKILL.md` or an agent file.
+- Saves are atomic (temporary file + rename, mode kept), re-check the hash right before the
+  rename, and refuse a symlink at the target. Errors, the validate output, the scan note and
+  the TAUT note reach the page with paths relative to the root. A non-ASCII token of the right
+  length got a 500 instead of a 403.
+
+Correctness:
+- **A `safe` fix could corrupt `allowed-tools`:** rewriting a flow list dropped the quotes of
+  the entries it did not touch (`"Bash(echo a, b)"` became two tools). Untouched entries keep
+  their text, new ones are quoted when they need it, and the list must read back as intended
+  or the fix is refused.
+- **A form save could corrupt `metadata`:** the whole map was re-emitted (a list of maps under
+  it became JSON strings). Only `metadata.taut` is replaced now. A blank line or a comment
+  inside a value no longer cuts it short (the old value stayed behind), a quoted key is
+  edited in place, and every save is read back: the changed fields must say what the form
+  says and every other key what it said before, or the save is refused.
+- The `...` frontmatter terminator (which the parser accepts) was not recognised by fixes and
+  form saves: a fix could edit the body, a save could write part of it twice.
+- `saut lint --json | head` crashed with EPIPE and exit 1 (since the 64 KB drain fix); a closed
+  pipe now keeps the command's own exit code.
+- The download-and-execute heuristic was quadratic on a long line (a 200 KB line took ~12 s);
+  it is linear now.
+- Linting one artifact reported every other artifact's suppression as unused.
+- A 500-line body was reported as 501 lines; an unreadable `verifiedAt` date read as fresh
+  (now stale).
+- Two runs started in the same second shared a results directory; run ids carry milliseconds
+  and the directory is created exclusively.
+- In a TAUT pack, a kept line identical to one in a removed branch could be mapped to the
+  removed one; the line map now comes from the engine's own marker pass.
+- `--only` with an unknown rule and `--model` with an unknown harness or a mixed form were
+  silently ignored; they are usage errors (exit 2).
+- A form save of a reordered allowlist reported a change and wrote none.
+
+Studio (browser):
+- **Suppress and Lift threw away unsaved edits** (the artifact was re-read from disk); the
+  edit now stays and is re-linted.
+- A slow live check, review, bench result or case list for one artifact could land on the
+  next one opened — and a review's proposal could be applied to it. Each is now tied to the
+  artifact it was started for.
+- A late suppress preview could re-enable another dialog's Apply; Ctrl/⌘+S worked under an
+  open dialog; a double click saved twice; Run and Measure re-enabled while a bench was
+  running (the server now also runs one bench at a time). The page behind a dialog is inert,
+  and focus returns where it was.
+- The review prompt goes to `claude` on stdin, not the command line (visible in `ps`, limited
+  by `ARG_MAX`); a prompt over 150 000 tokens is refused, and a reply flagged as an error is
+  shown as one.
+- `close()` no longer waits for open event streams, and stops a bench child still running.
+
 ## [0.6.4] — 2026-09-23
 
 ### Fixed

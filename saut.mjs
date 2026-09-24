@@ -161,7 +161,12 @@ const table = { lint: cmdLint, cost: cmdCost, passport: cmdPassport, preview: cm
 // Writes to a pipe are asynchronous: process.exit() right after a large write cuts the output
 // at the pipe buffer (64 KB) — `saut lint --json | jq` got half a document. An empty write's
 // callback fires once everything queued before it has been handed to the OS.
-const drained = (stream) => new Promise((resolve) => stream.write('', () => resolve()));
+// A reader that stops early (`saut lint --json | head`) closes the pipe: that is not a failure
+// of the command. The rest of its output is dropped and it exits with the code it computes.
+const broken = new Set();
+for (const s of [process.stdout, process.stderr]) s.on('error', (e) => { if (e.code === 'EPIPE') broken.add(s); else throw e; });
+const drained = (stream) => broken.has(stream) || stream.destroyed ? Promise.resolve()
+  : new Promise((resolve) => { stream.once('close', resolve); stream.write('', () => resolve()); });
 async function exit(code) {
   await Promise.all([drained(process.stdout), drained(process.stderr)]);
   process.exit(code);

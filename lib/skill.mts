@@ -112,7 +112,7 @@ export function agentFromText(file: string, text: string): AgentArtifact {
   };
 }
 
-function looksLikeAgentPath(file: string): boolean {
+export function looksLikeAgentPath(file: string): boolean {
   const parts = file.split(path.sep);
   const parent = parts[parts.length - 2] ?? '';
   const grand = parts[parts.length - 3] ?? '';

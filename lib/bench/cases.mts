@@ -7,6 +7,7 @@ import { parseFrontmatter, bodyOf } from '../frontmatter.mts';
 import type { Artifact } from '../types.mts';
 import { exists, fail, readText, walk } from '../util.mts';
 import type { BenchCase } from './types.mts';
+import { MODEL_ID } from './runners.mts';
 
 const CONTROL_PROMPT = 'Reply with the single word PONG and nothing else.';
 
@@ -17,6 +18,14 @@ function num(v: unknown, fallback: number, min: number, max: number, what: strin
   const n = Number(v);
   if (!Number.isFinite(n) || n < min || n > max) fail(`${what}: expected a number in ${min}..${max}, got ${JSON.stringify(v)}`);
   return n;
+}
+
+// A case may pin its model; the value reaches a harness CLI as an argument, so it must look
+// like a model id (a value such as `--auto` would be read as a flag).
+function modelOf(v: unknown, what: string): string | undefined {
+  if (v === undefined || v === null || v === '') return undefined;
+  if (typeof v !== 'string' || !MODEL_ID.test(v.trim())) fail(`${what}: model: expected a model id, got ${JSON.stringify(v)}`);
+  return (v as string).trim();
 }
 
 export async function loadCases(a: Artifact, filter?: string): Promise<BenchCase[]> {
@@ -66,7 +75,7 @@ export async function loadCases(a: Artifact, filter?: string): Promise<BenchCase
         tags: Array.isArray(d.tags) ? d.tags.map(String) : [],
         maxTurns: num(d.max_turns, 8, 1, 200, `${f}: max_turns`),
         timeoutSeconds: num(d.timeout_seconds, 300, 1, 86400, `${f}: timeout_seconds`),
-        model: typeof d.model === 'string' ? d.model : undefined,
+        model: modelOf(d.model, f),
         file: f,
       });
     }

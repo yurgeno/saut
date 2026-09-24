@@ -60,7 +60,9 @@ export function matches(s: Suppression, d: Diagnostic, artifactName: string | un
 
 // Mark the suppressed findings; report the suppressions that silenced nothing. `names` maps a
 // finding's path to its artifact name (compiled copies of one skill share it).
-export function applySuppressions(ds: Diagnostic[], names: Map<string, string>, set: SuppressionSet, opts: { reportUnused?: boolean } = {}): Diagnostic[] {
+// `only`: the artifacts this run linted, when it linted part of what saut.json covers — an
+// entry for an artifact outside it was not tested, so it is not reported as unused.
+export function applySuppressions(ds: Diagnostic[], names: Map<string, string>, set: SuppressionSet, opts: { reportUnused?: boolean; only?: Set<string> } = {}): Diagnostic[] {
   if (!set.list.length) return [...ds, ...set.problems];
   const used = new Set<number>();
   const out = ds.map((d) => {
@@ -69,7 +71,7 @@ export function applySuppressions(ds: Diagnostic[], names: Map<string, string>, 
     used.add(i);
     return { ...d, suppressed: { reason: set.list[i].reason, file: set.file! } };
   });
-  const unused = opts.reportUnused === false ? [] : set.list.flatMap((s, i) => used.has(i) ? [] : [{
+  const unused = opts.reportUnused === false ? [] : set.list.flatMap((s, i) => used.has(i) || (opts.only && !opts.only.has(s.artifact)) ? [] : [{
     code: 'suppression-unused', severity: 'low' as const, path: set.file!,
     message: `the suppression of ${s.rule} on ${s.artifact}${s.match ? ` ("${s.match}")` : ''} matches no finding — the finding was fixed, or the entry drifted; remove it`,
   }]);

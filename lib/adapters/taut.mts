@@ -152,7 +152,7 @@ export async function refine(a: Artifact, ctx: TautContext, text?: string): Prom
   // The engine parses SKILL frontmatter (strict subset) at compile time; agents it copies
   // byte-for-byte (or re-renders from a regex on `model:`), so their frontmatter is judged
   // by the generic parser over the gated text.
-  const lineMap = gatedLineMap(raw, on);
+  const lineMap = gatedLineMap(raw, on, (t) => ctx.api.applyMarkers(t, ctx.api.gatesAll(true), rel));
   if (a.kind === 'agent') {
     const fm = { ...parseFrontmatter(on, a.path), lineMap };
     const dOn = fm.data;
@@ -198,11 +198,21 @@ export async function refine(a: Artifact, ctx: TautContext, text?: string): Prom
 }
 
 // The engine's marker pass REMOVES lines (the markers, the branch that is off) and keeps the
-// rest verbatim, so the gated text is a subsequence of the file: walk both and record where
-// each kept line came from. Should a future engine rewrite a line, the walk runs past the end
-// and the remaining lines keep their own numbers rather than point somewhere wrong.
-export function gatedLineMap(raw: string, gated: string): number[] {
+// rest verbatim. With the pass itself (`apply`), every non-marker line is replaced by a tag
+// carrying its number and the tagged text goes through the same pass: the tags that come out
+// are exactly the lines kept — no guessing when a removed branch holds a line identical to a
+// kept one. The result is checked against the gated text; without `apply`, or should a future
+// engine rewrite a line, the gated text is walked as a subsequence of the file instead.
+const MARKER_SHAPE = /^(?:<!-- [a-z][a-z0-9-]*:(?:on|off|end) -->|# [a-z][a-z0-9-]*:(?:on|off|end))$/;
+export function gatedLineMap(raw: string, gated: string, apply?: (text: string) => string): number[] {
   const r = raw.split(/\r?\n/), g = gated.split(/\r?\n/);
+  if (apply) {
+    try {
+      const tagged = raw.split('\n').map((l, i) => (MARKER_SHAPE.test(l.trim()) ? l : `\u0001${i}`)).join('\n');
+      const kept = apply(tagged).split('\n').map((l) => Number(l.slice(1)));
+      if (kept.length === g.length && kept.every((k, i) => Number.isInteger(k) && r[k] === g[i])) return [0, ...kept.map((k) => k + 1)];
+    } catch { /* fall through to the walk */ }
+  }
   const map: number[] = [0];
   let j = 0;
   for (let i = 0; i < g.length; i++) {

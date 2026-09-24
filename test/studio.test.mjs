@@ -22,12 +22,17 @@ test.after(async () => { await studio.close(); await fs.rm(root, { recursive: tr
 // every /api route requires the token now — the page has it, nothing else does
 const get = (p, init = {}) => fetch(base + p, { ...init, headers: { 'x-saut-token': studio.token, ...(init.headers ?? {}) } });
 const getNoToken = (p) => fetch(base + p);
+// The page: through the printed address (its one-time key becomes a cookie), then by the cookie.
+async function getPage() {
+  const r = await fetch(studio.url, { redirect: 'manual' });
+  return fetch(base + '/', { headers: { cookie: r.headers.get('set-cookie').split(';')[0] } });
+}
 const post = (p, body, headers = {}) => fetch(base + p, {
   method: 'POST', headers: { 'content-type': 'application/json', 'x-saut-token': studio.token, ...headers }, body: JSON.stringify(body),
 });
 
 test('serves the page with the session token, and the token is not guessable', async () => {
-  const r = await get('/');
+  const r = await getPage();
   const html = await r.text();
   assert.equal(r.headers.get('content-type'), 'text/html; charset=utf-8');
   assert.equal(r.headers.get('cache-control'), 'no-store');
@@ -48,7 +53,7 @@ test('the page assets are served by name only, under the same policy', async () 
     assert.match(r.headers.get('content-security-policy'), /default-src 'none'/);
   }
   assert.match(await (await getNoToken('/vendor/codemirror.js')).text(), /EditorView/);
-  for (const p of ['/studio.html', '/server.mts', '/vendor/../server.mts', '/%2e%2e/package.json']) assert.equal((await getNoToken(p)).status, p === '/' ? 200 : 404, p);
+  for (const p of ['/studio.html', '/server.mts', '/vendor/../server.mts', '/%2e%2e/package.json']) assert.equal((await getNoToken(p)).status, 404, p);
 });
 
 // fetch() refuses to set Host (a forbidden header), so the rebinding guard is probed raw.
@@ -75,6 +80,7 @@ test('security contour: bad Host, missing token, foreign Origin are all refused'
   assert.equal((await get('/api/context')).headers.get('access-control-allow-origin'), null, 'no CORS headers are ever sent');
   // READS carry artifact contents: same-origin policy stops a foreign page, not another
   // local process scanning loopback ports, so every route needs the token
+  assert.equal((await getNoToken(`/api/context?token=${studio.token}`)).status, 403, 'the token in a query opens only the event stream');
   for (const route of ['/api/context', `/api/artifact?path=${encodeURIComponent(path.join(root, 'skills', 'fx-clean', 'SKILL.md'))}`]) {
     const r = await getNoToken(route);
     assert.equal(r.status, 403, route);
@@ -82,9 +88,20 @@ test('security contour: bad Host, missing token, foreign Origin are all refused'
   }
 });
 
-test('the page cannot be framed and declares a restrictive policy', async () => {
-  const r = await getNoToken('/');
-  assert.equal(r.status, 200, 'the page itself needs no token — it carries one');
+test('the page is served only through the printed address, cannot be framed, declares a restrictive policy', async () => {
+  // the page carries the API token, so a local process that finds the port gets nothing
+  const bare = await getNoToken('/');
+  assert.equal(bare.status, 403, 'no key, no cookie: no page');
+  assert.ok(!(await bare.text()).includes(studio.token));
+  assert.equal((await fetch(base + '/?k=' + 'f'.repeat(32), { redirect: 'manual' })).status, 403, 'a wrong key');
+  assert.equal((await fetch(base + '/?k=é', { redirect: 'manual' })).status, 403, 'a non-ASCII key is refused, not a crash');
+  assert.match(studio.url, /^http:\/\/127\.0\.0\.1:\d+\/\?k=[0-9a-f]{32}$/);
+  const launch = await fetch(studio.url, { redirect: 'manual' });
+  assert.equal(launch.status, 303);
+  assert.equal(launch.headers.get('location'), '/', 'the key leaves the address bar');
+  assert.match(launch.headers.get('set-cookie'), /HttpOnly; SameSite=Strict; Path=\//);
+  const r = await getPage();
+  assert.equal(r.status, 200, 'the cookie opens the page');
   assert.equal(r.headers.get('x-frame-options'), 'DENY');
   assert.match(r.headers.get('content-security-policy'), /frame-ancestors 'none'/);
   assert.equal(r.headers.get('referrer-policy'), 'no-referrer');
@@ -93,7 +110,7 @@ test('the page cannot be framed and declares a restrictive policy', async () => 
 // The helpers above send the token themselves, so they cannot notice the page forgetting it.
 // This drives the page's OWN api() — lifted from the served HTML — against the server.
 test('the served page reaches every read route with its own api()', async () => {
-  const html = await (await getNoToken('/')).text();
+  const html = await (await getPage()).text();
   const token = html.match(/<meta name="saut-token" content="([0-9a-f]+)">/)[1];
   const js = await (await getNoToken('/studio.js')).text();
   const src = js.match(/async function api\(path, body\) \{[\s\S]*?\n\}/)[0];
@@ -194,7 +211,24 @@ test('POST /api/save: creates a new skill in the spec layout, re-lints it, and c
   }
   const nonMd = await post('/api/save', { kind: 'skill', name: 'x', path: path.join(root, 'evil.sh'), frontmatter: { name: 'x' }, body: '' });
   assert.equal(nonMd.status, 400);
-  assert.match((await nonMd.json()).error, /non-markdown/);
+  assert.match((await nonMd.json()).error, /not a skill or agent/);
+  // only skill and agent files: not a CLAUDE.md, a command file, or a secret under the root
+  await fs.writeFile(path.join(root, 'CLAUDE.md'), '# rules\n');
+  await fs.writeFile(path.join(root, '.env'), 'SECRET=abc\n');
+  const claude = await post('/api/save', { path: 'CLAUDE.md', text: 'PWNED\n', base: 'x' });
+  assert.equal(claude.status, 400);
+  assert.match((await claude.json()).error, /not a skill or agent/);
+  assert.equal(await fs.readFile(path.join(root, 'CLAUDE.md'), 'utf8'), '# rules\n');
+  const cmd = await post('/api/save', { kind: 'skill', name: 'x', path: '.claude/commands/evil.md', frontmatter: { name: 'x' }, body: '' });
+  assert.equal(cmd.status, 400, 'no new file outside the skill and agent layouts');
+  for (const route of ['/api/compose', '/api/check']) {
+    const leak = await post(route, { path: '.env', text: '' });
+    assert.equal(leak.status, 400, route);
+    assert.ok(!(await leak.text()).includes('SECRET'), `${route} does not read an arbitrary file`);
+  }
+  assert.equal((await get('/api/artifact?path=CLAUDE.md')).status, 400);
+  const missing = await post('/api/compose', { path: 'skills/nope/SKILL.md', text: '' });
+  assert.ok(!(await missing.text()).includes(root), 'an error names no absolute path');
 });
 
 test('POST /api/test + SSE: L1 streams events and ends with the matrix', async () => {
@@ -259,7 +293,7 @@ test('the Studio runs L4: the level is not clamped to 3', async () => {
 // The page is not run in a browser here, so guard the wiring statically: every form field the
 // page renders must mark the form dirty, and everything that replaces the form must ask first.
 test('the page tracks unsaved edits on every field and asks before discarding them', async () => {
-  const shell = await (await getNoToken('/')).text();
+  const shell = await (await getPage()).text();
   const js = await (await getNoToken('/studio.js')).text();
   const html = shell + js;
   const fields = [...shell.matchAll(/<(?:input|textarea)[^>]*\bid="(f_[a-zA-Z]+)"/g)].map((m) => m[1]);

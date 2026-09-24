@@ -183,6 +183,7 @@ test('results live under SAUT_HOME, one directory per artifact, keyed by its rea
   } finally { await copy.cleanup(); }
   const run = await newResultsDir(skill);
   assert.equal(path.dirname(run), a);
-  assert.match(path.basename(run), /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}$/);
+  assert.match(path.basename(run), /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}$/);
+  assert.notEqual(await newResultsDir(skill), run, "a second run never reuses the first run’s directory");
   assert.equal(await artifactResultsRoot({ ...skill, name: '../../etc Evil' }).then((p) => path.dirname(p)), resultsHome(), 'a hostile name cannot escape the results home');
 });

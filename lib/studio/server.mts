@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 import { runBench } from '../bench/bench.mts';
-import { DEFAULT_MODEL } from '../bench/runners.mts';
+import { DEFAULT_MODEL, MODEL_ID } from '../bench/runners.mts';
 import { newResultsDir } from '../bench/results.mts';
 import type { BenchResult } from '../bench/types.mts';
 import { costOf, overBudget } from '../cost.mts';
@@ -34,6 +34,7 @@ import { applyFix, lineDiff } from '../fix.mts';
 import type { Artifact, Diagnostic } from '../types.mts';
 import { exists, onPath, readText } from '../util.mts';
 import { previews } from '../adapters/taut.mts';
+import { looksLikeAgentPath } from '../skill.mts';
 import { load, type Opts } from '../commands.mts';
 
 const run = promisify(execFile);
@@ -56,18 +57,36 @@ const VALIDATE_TIMEOUT_MS = 30 * 60 * 1000;                // a pack script that
 // Constant-time compare so a token cannot be recovered byte by byte from response timing.
 // Lengths differ → reject without comparing (the length is not a secret).
 function tokenOk(given: unknown, token: string): boolean {
-  if (typeof given !== 'string' || given.length !== token.length) return false;
-  return crypto.timingSafeEqual(Buffer.from(given), Buffer.from(token));
+  if (typeof given !== 'string') return false;
+  const a = Buffer.from(given), b = Buffer.from(token);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
-export interface StudioHandle { server: Server; token: string; port: number; close: () => Promise<void> }
+// A skill's SKILL.md or an agent's .md in an agents directory — the files the Studio lists.
+// Every route that reads or writes an artifact takes only these: not a README, not a CLAUDE.md,
+// not a command file, not a secret that happens to sit under the root.
+const isArtifactFile = (abs: string): boolean => path.basename(abs) === 'SKILL.md' || (abs.endsWith('.md') && looksLikeAgentPath(abs));
+
+const COOKIE = 'saut_studio';
+const cookieOf = (header: string | undefined): string | null => {
+  for (const part of (header ?? '').split(';')) { const [k, ...v] = part.trim().split('='); if (k === COOKIE) return v.join('='); }
+  return null;
+};
+
+// url: the address to open — it carries a one-time launch key; the page itself is served only
+// to a browser that came through it (the key becomes an HttpOnly, SameSite=Strict cookie).
+export interface StudioHandle { server: Server; token: string; port: number; url: string; close: () => Promise<void> }
 
 interface BenchJob { id: string; events: { kind: string; text: string }[]; done: boolean; result?: BenchResult; runId?: string; pair?: { id: string; before: string; after: string }; error?: string; listeners: Set<(e: { kind: string; text: string } | null) => void> }
 
 export async function startStudio(root: string, opts: Opts & { port?: number }): Promise<StudioHandle> {
   const token = crypto.randomBytes(16).toString('hex');
+  // The page carries the API token, so the page itself is not for any local process that finds
+  // the port: it is served only with the launch key (printed once) or the cookie it sets.
+  const launchKey = crypto.randomBytes(16).toString('hex');
   let boundPort = 0;
   const jobs = new Map<string, BenchJob>();
+  const children = new Set<import('node:child_process').ChildProcess>();
   let busy = false;
 
   const hostOk = (host: string | undefined): boolean =>
@@ -78,6 +97,13 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
   // accepted from local callers.
   const resolveIn = (p: unknown): string => path.resolve(root, String(p ?? ''));
   const relOf = (abs: string): string => path.relative(root, abs) || '.';
+  // An artifact the page names: under the root (symlinks resolved) and a skill or agent file.
+  async function artifactIn(p: unknown): Promise<string> {
+    const abs = resolveIn(p);
+    if (!(await contained(abs))) throw new Error('path outside the studio root');
+    if (!isArtifactFile(abs)) throw new Error('not a skill or agent file — the Studio reads and writes SKILL.md and agent .md files only');
+    return abs;
+  }
 
   // A compiled TAUT workspace seals its files with taut.lock: an edit there is overwritten by
   // the next `taut update` and makes `taut verify` fail. Those files are shown read-only, with
@@ -117,7 +143,7 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
     const real = async (p: string) => fs.realpath(p).catch(() => p);
     return {
       root: path.basename(root),
-      note,
+      note: note === null ? null : scrub(note),
       mode: taut ? 'taut' : locked.size ? 'compiled' : 'generic',
       // what this backend can do — the page shows or hides by these, never by guessing where it runs
       capabilities: { write: true, fix: true, check: true, compose: true, bench: harnesses.some((h) => h.runner), validate: !!taut, history: true, suppress: true, scan: true, llmReview: await onPath('claude') },
@@ -148,8 +174,7 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
   // compiled bytes. The same functions `saut lint|cost|passport` call. With `text`, the
   // passport of an UNSAVED edit: linted in memory, nothing written, no compile preview.
   async function passport(file: string, text?: string) {
-    const abs = resolveIn(file);
-    if (!(await contained(abs))) throw new Error('path outside the studio root');
+    const abs = await artifactIn(file);
     const { artifacts, harnesses, registry, agentsByName, taut, tautFindings } = await load([abs], opts);
     const onDisk = artifacts[0];
     if (!onDisk) throw new Error(`no skill or agent at ${relOf(abs)}`);
@@ -288,7 +313,7 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
   // form's frontmatter into the spec layout.
   async function writable(file: string): Promise<void> {
     if (!(await contained(file))) throw new Error('path outside the studio root');
-    if (path.basename(file) !== 'SKILL.md' && !file.endsWith('.md')) throw new Error('refusing to write a non-markdown file');
+    if (!isArtifactFile(file)) throw new Error('refusing to write a file that is not a skill or agent');
     const lock = await exists(file) ? await compiledOf(file) : null;
     if (lock) throw new Error(`read-only: compiled from ${lock.pack ?? 'the pack'} (${lock.source}) — edit the source and recompile`);
   }
@@ -299,11 +324,11 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
       await writable(file);
       if (!(await exists(file))) throw new Error('no such file — a new artifact is created from the form');
       const current = await readText(file);
-      if (payload.base !== hashOf(current)) throw new Error('the file changed on disk since it was opened — reload it (your edit is still in the editor)');
+      if (payload.base !== hashOf(current)) throw new Error(CHANGED);
       const { parseFrontmatter } = await import('../frontmatter.mts');
       const broken = (t: string) => parseFrontmatter(t, file).diagnostics.filter((d) => d.code === 'frontmatter-syntax' || d.code === 'no-frontmatter').length;
       if (broken(payload.text) > broken(current)) throw new Error('the frontmatter would not parse — fix the reported line first');
-      await writeContained(file, payload.text, false);
+      await writeContained(file, payload.text, false, payload.base);
       return { path: file, created: false };
     }
     const kind = payload.kind === 'agent' ? 'agent' : 'skill';
@@ -311,7 +336,9 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
     const body = String(payload.body ?? '');
     const fm = payload.frontmatter && typeof payload.frontmatter === 'object' ? payload.frontmatter : null;
     if (!fm) throw new Error('frontmatter is required');
-    const file = payload.path ? resolveIn(payload.path) : await targetFor(kind, name, payload.project ?? null);
+    const project = typeof payload.project === 'string' && payload.project ? payload.project : null;
+    if (project && !NAME.test(project)) throw new Error('a project is a directory name of lowercase letters, digits and dashes');
+    const file = payload.path ? resolveIn(payload.path) : await targetFor(kind, name, project);
     await writable(file);
     // Re-emitting an existing file from the form drops every key the form does not show
     // (disallowed-tools, hooks, capability branches…) — existing files go through compose.
@@ -326,8 +353,7 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
   // The text an edit amounts to: the Source view's text as is, or the form applied to the text
   // it was filled from (`from` — the Source text after a switch — else the file on disk).
   async function editedText(payload: any): Promise<{ file: string; disk: string; text: string; changed: string[] } | { reason: string }> {
-    const file = resolveIn(payload.path);
-    if (!(await contained(file))) throw new Error('path outside the studio root');
+    const file = await artifactIn(payload.path);
     const disk = await readText(file);
     if (typeof payload.text === 'string') return { file, disk, text: payload.text, changed: ['source'] };
     const { compose } = await import('../compose.mts');
@@ -342,22 +368,36 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
     return { ok: true, text: e.text, changed: e.changed, diff: lineDiff(e.disk, e.text), base: hashOf(e.disk) };
   }
 
-  // Callers have checked containment. O_NOFOLLOW on the final component: a symlink planted at
-  // the target must not redirect the write (containment already resolved the directory chain).
-  async function writeContained(file: string, text: string, created: boolean): Promise<void> {
+  // Callers have checked containment. A new file is created exclusively (`wx`). An existing one
+  // is replaced atomically — the text goes to a temporary file next to it, which is renamed over
+  // it — so a failed write never leaves it truncated; a symlink at the target is refused, not
+  // followed; and with `base` the file is re-hashed right before the rename, so an edit saved
+  // meanwhile elsewhere is refused rather than overwritten.
+  async function writeContained(file: string, text: string, created: boolean, base?: string): Promise<void> {
     await fs.mkdir(path.dirname(file), { recursive: true });
-    const flags = created ? 'wx' : fsSync.constants.O_WRONLY | fsSync.constants.O_TRUNC | fsSync.constants.O_NOFOLLOW;
-    const h = await fs.open(file, flags as never);
-    try { await h.writeFile(text); } finally { await h.close(); }
+    if (created) {
+      const h = await fs.open(file, 'wx');
+      try { await h.writeFile(text); } finally { await h.close(); }
+      return;
+    }
+    const st = await fs.lstat(file);
+    if (st.isSymbolicLink() || !st.isFile()) throw new Error(`${relOf(file)} is not a regular file — refusing to write through it`);
+    const tmp = path.join(path.dirname(file), `.${path.basename(file)}.saut-${crypto.randomBytes(4).toString('hex')}.tmp`);
+    const h = await fs.open(tmp, 'wx', st.mode & 0o777);
+    try {
+      try { await h.writeFile(text); await h.sync(); } finally { await h.close(); }
+      if (base !== undefined && hashOf(await readText(file)) !== base) throw new Error(CHANGED);
+      await fs.rename(tmp, file);
+    } catch (e) { await fs.rm(tmp, { force: true }); throw e; }
   }
+  const CHANGED = 'the file changed on disk since it was opened — reload it (your edit is still in the editor)';
 
   // A mechanical fix, previewed then applied. Only a fix the linter proposes for the file AS
   // IT IS NOW is accepted — the page cannot smuggle an arbitrary edit through this route —
   // and the apply step carries the hash of the text the preview was computed from, so a file
   // edited in between is refused rather than patched blind.
   async function fix(payload: any) {
-    const file = resolveIn(payload.path);
-    if (!(await contained(file))) throw new Error('path outside the studio root');
+    const file = await artifactIn(payload.path);
     if (payload.apply) await writable(file);
     const pass = await passport(file);
     const want = JSON.stringify(payload.autofix ?? null);
@@ -368,7 +408,7 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
     if (!r.ok) return { ok: false, reason: r.reason, diff: '', base };
     if (!payload.apply) return { ok: true, diff: lineDiff(pass.text, r.text), base, label: finding.autofix.label };
     if (payload.base !== base) throw new Error('the file changed since the preview — review the fix again');
-    await writeContained(file, r.text, false);
+    await writeContained(file, r.text, false, base);
     return { ok: true, applied: true, label: finding.autofix.label, passport: await passport(file) };
   }
 
@@ -381,19 +421,19 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
     if (script && (await exists(script))) {
       try {
         const r = await run(script, [], { cwd: taut!.packRoot, env, maxBuffer: 16 * 1024 * 1024, timeout: VALIDATE_TIMEOUT_MS, killSignal: 'SIGKILL', shell: false });
-        return { ok: true, command: 'tools/validate-pack.sh', output: r.stdout.slice(-20000) };
+        return { ok: true, command: 'tools/validate-pack.sh', output: scrub(r.stdout.slice(-20000)) };
       } catch (e) {
         const err = e as { stdout?: string; stderr?: string };
-        return { ok: false, command: 'tools/validate-pack.sh', output: ((err.stdout ?? '') + (err.stderr ?? '')).slice(-20000) };
+        return { ok: false, command: 'tools/validate-pack.sh', output: scrub(((err.stdout ?? '') + (err.stderr ?? '')).slice(-20000)) };
       }
     }
     const cli = path.join(path.dirname(HERE).replace(/\/lib$/, ''), 'saut.mjs');
     try {
       const r = await run(process.execPath, [cli, 'lint', root, '--strict'], { env, maxBuffer: 16 * 1024 * 1024, timeout: VALIDATE_TIMEOUT_MS, killSignal: 'SIGKILL' });
-      return { ok: true, command: 'saut lint --strict', output: r.stdout.slice(-20000) };
+      return { ok: true, command: 'saut lint --strict', output: scrub(r.stdout.slice(-20000)) };
     } catch (e) {
       const err = e as { stdout?: string; stderr?: string };
-      return { ok: false, command: 'saut lint --strict', output: ((err.stdout ?? '') + (err.stderr ?? '')).slice(-20000) };
+      return { ok: false, command: 'saut lint --strict', output: scrub(((err.stdout ?? '') + (err.stderr ?? '')).slice(-20000)) };
     }
   }
 
@@ -422,17 +462,24 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
     const selected = harnesses.filter((h) => h.runner && (!wanted.length || wanted.includes(h.id)));
     const models: Record<string, string> = {};
     if (payload.models && typeof payload.models === 'object')
-      for (const [h, m] of Object.entries(payload.models)) if (typeof m === 'string' && /^[A-Za-z0-9._:\/\[\]-]{1,80}$/.test(m.trim()) && selected.some((x) => x.id === h)) models[h] = m.trim();
+      for (const [h, m] of Object.entries(payload.models)) {
+        if (!selected.some((x) => x.id === h) || typeof m !== 'string' || !m.trim()) continue;
+        if (!MODEL_ID.test(m.trim())) throw new Error(`"${m.slice(0, 80)}" is not a model id`);
+        models[h] = m.trim();
+      }
     const level = Math.min(4, Math.max(1, Math.trunc(Number(payload.level)) || 3)) as 1 | 2 | 3 | 4;
-    const runs = Math.max(1, Math.min(5, Number(payload.runs) || 1));
+    const runs = Math.max(1, Math.min(5, Math.trunc(Number(payload.runs)) || 1));
+    // the ceiling is what stops a paid run: anything that is not a number is refused, never
+    // turned into a NaN that no spend ever reaches
     const maxCostUsd = payload.maxCost === undefined || payload.maxCost === null || payload.maxCost === '' ? null : Number(payload.maxCost);
+    if (maxCostUsd !== null && !(Number.isFinite(maxCostUsd) && maxCostUsd >= 0)) throw new Error('the cost ceiling must be a number of dollars, 0 or more');
     const caseFilter = typeof payload.case === 'string' && /^[A-Za-z0-9._*-]{1,80}$/.test(payload.case) ? payload.case : undefined;
     return { selected, models, level, runs, maxCostUsd, caseFilter };
   }
 
+  const benchRunning = () => [...jobs.values()].some((j) => !j.done);
   async function startBench(payload: any): Promise<string> {
-    const file = resolveIn(payload.path);
-    if (!(await contained(file))) throw new Error('path outside the studio root');
+    const file = await artifactIn(payload.path);
     if (typeof payload.variantText === 'string') return startPair(file, payload);
     const { artifacts, harnesses, taut } = await load([file], opts);
     const a = artifacts[0];
@@ -468,22 +515,32 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
     const a = artifacts[0];
     if (!a) throw new Error('no artifact at that path');
     const p = benchParams(payload, harnesses);
-    const { id, job, push, finish } = newJob();
     const pair = crypto.randomBytes(4).toString('hex');
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'saut-variant-'));
     const skip = (src: string) => !/(^|\/)(\.git|node_modules)(\/|$)/.test(src);
     let variant: string;
-    if (taut) {
-      await fs.cp(taut.packRoot, path.join(tmp, 'pack'), { recursive: true, filter: skip });
-      variant = path.join(tmp, 'pack', path.relative(taut.packRoot, a.path));
-    } else if (a.kind === 'skill') {
-      await fs.cp(a.dir, path.join(tmp, path.basename(a.dir)), { recursive: true, filter: skip });
-      variant = path.join(tmp, path.basename(a.dir), 'SKILL.md');
-    } else {
-      await fs.mkdir(path.join(tmp, 'agents'), { recursive: true });
-      variant = path.join(tmp, 'agents', path.basename(a.path));
-    }
-    await fs.writeFile(variant, payload.variantText);
+    // The copy holds files, never links: a SKILL.md (or a skill directory) that is a symlink
+    // would otherwise be copied as a link back into the project, and writing the variant
+    // through it would change the real file.
+    try {
+      if (taut) {
+        await fs.cp(taut.packRoot, path.join(tmp, 'pack'), { recursive: true, filter: skip, dereference: true });
+        variant = path.join(tmp, 'pack', path.relative(taut.packRoot, a.path));
+      } else if (a.kind === 'skill') {
+        await fs.cp(a.dir, path.join(tmp, path.basename(a.dir)), { recursive: true, filter: skip, dereference: true });
+        variant = path.join(tmp, path.basename(a.dir), 'SKILL.md');
+      } else {
+        await fs.mkdir(path.join(tmp, 'agents'), { recursive: true });
+        variant = path.join(tmp, 'agents', path.basename(a.path));
+      }
+      const realTmp = await fs.realpath(tmp);
+      const dir = await fs.realpath(path.dirname(variant));
+      if (dir !== realTmp && !dir.startsWith(realTmp + path.sep)) throw new Error('the throwaway copy resolves outside its directory');
+      await fs.rm(variant, { force: true });
+      const h = await fs.open(variant, 'wx');
+      try { await h.writeFile(payload.variantText); } finally { await h.close(); }
+    } catch (e) { await fs.rm(tmp, { recursive: true, force: true }); throw e; }
+    const { id, job, push, finish } = newJob();
     const target = (f: string) => (a.kind === 'skill' ? path.dirname(f) : f);
     const cli = path.join(HERE, '..', '..', 'saut.mjs');
     const common = ['--level', String(p.level), '--runs', String(p.runs), '--harness', p.selected.map((h) => h.id).join(','),
@@ -495,6 +552,7 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
       push({ kind: 'step', text: `${label}: ${label === 'before' ? 'the file as saved' : 'your unsaved edit (a throwaway copy)'}` });
       await new Promise<void>((resolve) => {
         const child = spawn(process.execPath, [cli, 'test', target(f), ...common, '--label', label, '--out', outDir], { env: { ...process.env, NO_COLOR: '1' }, stdio: ['ignore', 'ignore', 'pipe'] });
+        children.add(child);
         let buf = '';
         child.stderr.on('data', (d: Buffer) => {
           buf += d.toString();
@@ -505,9 +563,12 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
             if (line) push({ kind: m?.[1] ?? 'log', text: `[${label}] ${m?.[2] ?? line}` });
           }
         });
-        child.on('close', () => resolve());
+        child.on('error', (e) => push({ kind: 'fail', text: `[${label}] ${e.message}` }));
+        child.on('close', () => { children.delete(child); resolve(); });
       });
-      return { outDir, result: JSON.parse(await readText(path.join(outDir, 'matrix.json'))) as BenchResult };
+      const matrix = await readText(path.join(outDir, 'matrix.json')).catch(() => null);
+      if (matrix === null) throw new Error(`the ${label} side did not finish — see the log above`);
+      return { outDir, result: JSON.parse(matrix) as BenchResult };
     };
     (async () => {
       try {
@@ -529,20 +590,27 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
     const { scan } = await import('../scan.mts');
     const { taut } = await load([root], opts);
     const r = await scan(taut ? taut.packRoot : root);
-    lastScan = { at: new Date().toISOString(), ran: r.ran, note: r.note, diagnostics: r.diagnostics };
-    return { ran: r.ran, note: r.note, findings: r.diagnostics.length };
+    const note = r.note === null ? null : scrub(r.note);
+    lastScan = { at: new Date().toISOString(), ran: r.ran, note, diagnostics: r.diagnostics };
+    return { ran: r.ran, note, findings: r.diagnostics.length };
   }
 
   // Suppress a finding — or lift a suppression — in saut.json: the nearest one above the
   // artifact when it lies under the root, else <root>/saut.json. Previewed as a diff, applied
   // against the hash of the file as previewed, like every other write.
   async function suppress(payload: any) {
-    const abs = resolveIn(payload.path);
-    if (!(await contained(abs))) throw new Error('path outside the studio root');
+    const abs = await artifactIn(payload.path);
     const { findConfig, MIN_REASON } = await import('../suppress.mts');
     const near = await findConfig(abs);
-    const file = near && (await contained(near)) ? near : path.join(root, 'saut.json');
-    const before = (await exists(file)) ? await readText(file) : '';
+    // The saut.json that applies to this artifact is the nearest one. When that one lies above
+    // the root, a new <root>/saut.json would silently hide its budgets and suppressions — so
+    // the Studio does not create one; the entry goes into that file by hand.
+    if (near && !(await contained(near))) throw new Error('the saut.json that applies here is outside the Studio root — add the suppression there by hand');
+    const file = near ?? path.join(root, 'saut.json');
+    const st = await fs.lstat(file).catch(() => null);
+    if (st && (st.isSymbolicLink() || !st.isFile())) throw new Error(`${relOf(file)} is not a regular file — edit it by hand`);
+    const created = !st;
+    const before = created ? '' : await readText(file);
     let cfg: any = {};
     if (before) { try { cfg = JSON.parse(before); } catch { throw new Error(`${relOf(file)} does not parse — fix it by hand first`); } }
     if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) throw new Error(`${relOf(file)} is not a JSON object`);
@@ -565,7 +633,7 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
     const base = hashOf(before);
     if (!payload.apply) return { file: relOf(file), diff: lineDiff(before, after), base };
     if (payload.base !== base) throw new Error('saut.json changed since the preview — review it again');
-    await writeContained(file, after, !before);
+    await writeContained(file, after, created, created ? undefined : base);
     return { file: relOf(file), applied: true };
   }
 
@@ -573,13 +641,14 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
   // checked (its text occurs exactly once), applied in memory, re-linted — what it resolves and
   // what it introduces — and the review is kept outside the project for the record.
   async function review(payload: any) {
-    const abs = resolveIn(payload.path);
-    if (!(await contained(abs))) throw new Error('path outside the studio root');
+    const abs = await artifactIn(payload.path);
     const base: string = typeof payload.text === 'string' ? payload.text : await readText(abs);
     const pass = await passport(abs, base);
-    const { buildReviewPrompt, runReviewer, parseReview, applyChange, DEFAULT_REVIEW_MODEL } = await import('../review.mts');
+    const { buildReviewPrompt, runReviewer, parseReview, applyChange, DEFAULT_REVIEW_MODEL, MAX_PROMPT_TOKENS } = await import('../review.mts');
     const { RULES } = await import('../rules.mts');
-    const model = typeof payload.model === 'string' && /^[A-Za-z0-9._:\[\]-]{1,60}$/.test(payload.model.trim()) ? payload.model.trim() : DEFAULT_REVIEW_MODEL;
+    const asked = typeof payload.model === 'string' ? payload.model.trim() : '';
+    if (asked && !MODEL_ID.test(asked)) throw new Error(`"${asked.slice(0, 80)}" is not a model id`);
+    const model = asked || DEFAULT_REVIEW_MODEL;
     const active = pass.findings.filter((f) => !f.suppressed);
     const prompt = buildReviewPrompt({
       name: pass.name, kind: pass.kind as 'skill' | 'agent', file: pass.path, text: base, findings: active,
@@ -587,7 +656,9 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
       harnesses: pass.matrix.map((m) => ({ id: m.harness, allowlist: m.allowlist })),
     });
     const { estimateTokens } = await import('../cost.mts');
-    if (payload.estimate) return { model, inputTokens: estimateTokens(prompt), findings: active.length };
+    const inputTokens = estimateTokens(prompt);
+    if (payload.estimate) return { model, inputTokens, findings: active.length, ...(inputTokens > MAX_PROMPT_TOKENS ? { tooLarge: MAX_PROMPT_TOKENS } : {}) };
+    if (inputTokens > MAX_PROMPT_TOKENS) throw new Error(`the review would send about ${inputTokens} tokens — more than ${MAX_PROMPT_TOKENS}; a skill that large should be split first`);
     const { reply, costUsd } = await runReviewer(prompt, model);
     const parsed = parseReview(reply);
     const key = (f: Diagnostic) => `${f.code}|${f.message}`;
@@ -615,8 +686,7 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
 
   // The cases a bench runs: authored under evals/, else the three generated ones.
   async function cases(file: string) {
-    const abs = resolveIn(file);
-    if (!(await contained(abs))) throw new Error('path outside the studio root');
+    const abs = await artifactIn(file);
     const { artifacts } = await load([abs], opts);
     const a = artifacts[0];
     if (!a) throw new Error('no artifact at that path');
@@ -633,7 +703,7 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
   // Write one case as <evals>/<name>/prompt.md — the Claude Code plugin-eval layout the bench
   // reads, plus SAUT's `expect` / `invocation` keys.
   async function saveCase(payload: any) {
-    const abs = resolveIn(payload.path);
+    const abs = await artifactIn(payload.path);
     await writable(abs);
     const { artifacts } = await load([abs], opts);
     const a = artifacts[0];
@@ -648,6 +718,7 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
       const maxTurns = Math.max(1, Math.min(200, Math.trunc(Number(c.maxTurns)) || 8));
       const file = path.join(evalsDir(a), name, 'prompt.md');
       if (!(await contained(file))) throw new Error('path outside the studio root');
+      if (await exists(file) && await compiledOf(file)) throw new Error(`${relOf(file)} is sealed by taut.lock — edit the source and recompile`);
       const text = emitFrontmatter({ name, invocation, expect, max_turns: maxTurns }) + String(c.prompt ?? '').trim() + '\n';
       await fs.mkdir(path.dirname(file), { recursive: true });
       await writeContained(file, text, !(await exists(file)));
@@ -657,8 +728,7 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
   }
 
   async function runs(file: string) {
-    const abs = resolveIn(file);
-    if (!(await contained(abs))) throw new Error('path outside the studio root');
+    const abs = await artifactIn(file);
     const { artifacts } = await load([abs], opts);
     if (!artifacts[0]) throw new Error('no artifact at that path');
     const { listRuns } = await import('../bench/results.mts');
@@ -666,8 +736,7 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
   }
 
   async function runDetail(file: string, runId: string) {
-    const abs = resolveIn(file);
-    if (!(await contained(abs))) throw new Error('path outside the studio root');
+    const abs = await artifactIn(file);
     const { artifacts } = await load([abs], opts);
     if (!artifacts[0]) throw new Error('no artifact at that path');
     const { readRun, summarize } = await import('../bench/results.mts');
@@ -678,8 +747,7 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
   // What a bench will cost before it runs: model runs from the cases, and — where this
   // artifact has been benched before — the average spend per run on each harness.
   async function estimate(payload: any) {
-    const abs = resolveIn(payload.path);
-    if (!(await contained(abs))) throw new Error('path outside the studio root');
+    const abs = await artifactIn(payload.path);
     const { artifacts, harnesses } = await load([abs], opts);
     const a = artifacts[0];
     if (!a) throw new Error('no artifact at that path');
@@ -714,8 +782,13 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
   const realRoot = await fs.realpath(root).catch(() => root);
   const server = createServer(async (req, res) => {
     const send = (code: number, body: unknown, type = 'application/json') => {
+      if (res.headersSent) return undefined;
+      // an error names a file only relative to the root — never where anything lives
+      if (code >= 400 && body && typeof body === 'object' && typeof (body as { error?: unknown }).error === 'string')
+        body = { ...body, error: scrub((body as { error: string }).error) };
       res.writeHead(code, { 'content-type': type, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
       res.end(type === 'application/json' ? JSON.stringify(body, null, 2) : String(body));
+      return undefined;
     };
     try {
       if (!hostOk(req.headers.host)) return send(403, { error: 'bad host' });
@@ -723,6 +796,15 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
       const { pathname } = url;
 
       if (req.method === 'GET' && pathname === '/') {
+        // The launch key (in the printed URL) becomes a cookie, and the key leaves the address
+        // bar; afterwards the cookie alone opens the page. Without either, nothing is served.
+        if (url.searchParams.has('k')) {
+          if (!tokenOk(url.searchParams.get('k'), launchKey)) return send(403, 'This is not the address saut studio printed.', 'text/plain; charset=utf-8');
+          res.writeHead(303, { location: '/', 'set-cookie': `${COOKIE}=${launchKey}; HttpOnly; SameSite=Strict; Path=/`, 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' });
+          return res.end();
+        }
+        if (!tokenOk(cookieOf(req.headers.cookie), launchKey))
+          return send(403, 'Open the address saut studio printed in the terminal (it carries a one-time key).', 'text/plain; charset=utf-8');
         // A mutating loopback UI must not be frameable: the token lives INSIDE the page, so
         // CSRF headers do not protect against a foreign page iframing it and stealing clicks.
         res.writeHead(200, {
@@ -744,7 +826,7 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
       // foreign PAGE, not another local process scanning loopback ports. Every /api route
       // requires the token; the page has it, nothing else does.
       if (pathname.startsWith('/api/') && !pathname.startsWith('/api/test/')
-        && !tokenOk(req.headers['x-saut-token'] ?? url.searchParams.get('token'), token))
+        && !tokenOk(req.headers['x-saut-token'], token))
         return send(403, { error: 'bad or missing token' });
       if (req.method === 'GET' && pathname === '/api/context') return send(200, await context());
       if (req.method === 'GET' && pathname === '/api/overview') return send(200, await overview());
@@ -803,7 +885,10 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
             return send(200, await passport(e.file, e.text));
           }
           if (pathname === '/api/fix') return send(200, await fix(payload));
-          if (pathname === '/api/test') return send(200, { id: await startBench(payload) });
+          if (pathname === '/api/test') {
+            if (benchRunning()) return send(409, { error: 'a bench is already running — wait for it to finish' });
+            return send(200, { id: await startBench(payload) });
+          }
           if (pathname === '/api/case') return send(200, await saveCase(payload));
           if (pathname === '/api/suppress') return send(200, await suppress(payload));
           if (pathname === '/api/review') {
@@ -831,7 +916,11 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
     }
   });
 
-  await new Promise<void>((resolve) => server.listen(opts.port ?? 0, '127.0.0.1', resolve));
+  await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(opts.port ?? 0, '127.0.0.1', () => { server.off('error', reject); resolve(); }); });
   boundPort = (server.address() as AddressInfo).port;
-  return { server, token, port: boundPort, close: () => new Promise<void>((r) => server.close(() => r())) };
+  return {
+    server, token, port: boundPort, url: `http://127.0.0.1:${boundPort}/?k=${launchKey}`,
+    // open event streams would keep close() waiting forever; a bench side still running is stopped
+    close: () => new Promise<void>((r) => { for (const c of children) c.kill('SIGKILL'); server.close(() => r()); server.closeAllConnections(); }),
+  };
 }

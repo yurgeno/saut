@@ -28,13 +28,29 @@ const READONLY_CLAIM_DESC = /(?<!\b(?:repos?|repositories|tracker|jira|git|scm|b
 const READONLY_CLAIM_BODY = /^\s*(?:>|\*\*|[-*] )?\s*read[- ]only\b|\bthis (?:skill|agent) (?:is read[- ]only|never writes|does not write|must not write)|\bNEVER writes\b/im;
 const EXTERNAL_INPUT = /\b(jira|ticket|tracker|attachment|webfetch|websearch|web page|url|http[s]?:\/\/|context7|mcp__atlassian|mcp__context7|scrap|fetch)\b/i;
 const UNTRUSTED_RULE = /\b(untrusted|treat(?:ed)? as data|is data,? not|not (?:as )?instructions?|prompt[- ]injection|never follow instructions)\b/i;
-const INJECTION = [
-  { re: /ignore (?:all |any )?(?:previous|prior|above) instructions/i, what: 'contains an "ignore previous instructions" phrase' },
-  { re: /[​-‏⁠﻿‪-‮]/, what: 'contains invisible/bidi Unicode control characters' },
-  { re: /\b(curl|wget)\b[^\n]*\|\s*(sh|bash|zsh|node|python)\b/i, what: 'contains a download-and-execute pipeline' },
+// Each probe returns the index of its first match in the body, or -1.
+const byRe = (re: RegExp) => (s: string): number => re.exec(s)?.index ?? -1;
+// curl|wget … | sh on one line. Linear: find each pipe into an interpreter, then look for the
+// download before it on that line — one regex with `[^\n]*` between the two backtracks
+// quadratically on a long line (an untrusted skill could stall a CI lint).
+function downloadExec(s: string): number {
+  let off = 0;
+  for (const l of s.split('\n')) {
+    for (const m of l.matchAll(/\|\s*(?:sh|bash|zsh|node|python)\b/gi)) {
+      const c = /\b(?:curl|wget)\b/i.exec(l.slice(0, m.index));
+      if (c) return off + c.index;
+    }
+    off += l.length + 1;
+  }
+  return -1;
+}
+const INJECTION: { find: (s: string) => number; what: string }[] = [
+  { find: byRe(/ignore (?:all |any )?(?:previous|prior|above) instructions/i), what: 'contains an "ignore previous instructions" phrase' },
+  { find: byRe(/[​-‏⁠﻿‪-‮]/), what: 'contains invisible/bidi Unicode control characters' },
+  { find: downloadExec, what: 'contains a download-and-execute pipeline' },
   // the credential file must be the command's ARGUMENT — "never echo credentials; fill
   // `.taut/local.env`" is a prohibition in prose, not a read
-  { re: /\b(?:cat|less|more|head|tail|echo|printf|base64)\s+(?:-\w+\s+)*["'`]?[\w$~./-]*(?:\.env\b|id_rsa|\.aws\/credentials|\.netrc)/i, what: 'reads a credential file' },
+  { find: byRe(/\b(?:cat|less|more|head|tail|echo|printf|base64)\s+(?:-\w+\s+)*["'`]?[\w$~./-]*(?:\.env\b|id_rsa|\.aws\/credentials|\.netrc)/i), what: 'reads a credential file' },
 ];
 const SECRET = [
   /\b(sk-ant-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{32,}|ghp_[A-Za-z0-9]{36}|glpat-[A-Za-z0-9_-]{20}|xox[baprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16})\b/,
@@ -50,9 +66,9 @@ function d(a: Artifact, code: string, severity: Diagnostic['severity'], message:
 // 1-based file line of the first body match — findings about the body point at it.
 function bodyLine(a: Artifact, re: RegExp): number | undefined {
   const m = re.exec(a.body);
-  if (!m) return undefined;
-  return a.fm.bodyOffset + a.body.slice(0, m.index).split('\n').length - 1;
+  return m ? lineAt(a, m.index) : undefined;
 }
+const lineAt = (a: Artifact, index: number): number => a.fm.bodyOffset + a.body.slice(0, index).split('\n').length - 1;
 
 // Current names for tools older harness versions called otherwise.
 const LEGACY_REPLACEMENT: Record<string, string> = { MultiEdit: 'Edit', LS: 'Glob', NotebookRead: 'Read', Task: 'Agent', SlashCommand: 'Skill' };
@@ -208,12 +224,12 @@ export function lintArtifact(a: Artifact, o: LintOptions): Diagnostic[] {
 
   // ---- injection heuristics / secrets --------------------------------------------------
   for (const p of INJECTION) {
-    const m = p.re.exec(a.body);
-    if (!m) continue;
-    const lineText = a.body.slice(a.body.lastIndexOf('\n', m.index) + 1).split('\n')[0].trim();
+    const at = p.find(a.body);
+    if (at < 0) continue;
+    const lineText = a.body.slice(a.body.lastIndexOf('\n', at) + 1).split('\n')[0].trim();
     // show the line so the reader can judge it — but never echo invisible control characters
     const shown = /[\u200B-\u200F\u2060\uFEFF\u202A-\u202E]/.test(lineText) ? '' : `: "${lineText.length > 90 ? lineText.slice(0, 87) + '…' : lineText}"`;
-    out.push(d(a, 'injection-heuristic', 'medium', `body ${p.what}${shown}`, { precedent: 'ToxicSkills', line: bodyLine(a, p.re) }));
+    out.push(d(a, 'injection-heuristic', 'medium', `body ${p.what}${shown}`, { precedent: 'ToxicSkills', line: lineAt(a, at) }));
   }
   for (const p of SECRET) if (p.test(a.body) || p.test(a.fm.data ? JSON.stringify(a.fm.data) : '')) out.push(d(a, 'secret-pattern', 'high', 'a secret-shaped value appears in the artifact', { precedent: 'scan-secrets', line: bodyLine(a, p) }));
 

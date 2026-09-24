@@ -52,8 +52,7 @@ test('Studio: estimate, run, per-proposal check and re-lint, a record outside th
   // a fake claude: saves the prompt it was given, answers like `claude -p --output-format json`
   await fs.writeFile(path.join(bin, 'claude'), `#!${process.execPath}
 const fs = require('node:fs');
-const i = process.argv.indexOf('-p');
-fs.writeFileSync(${JSON.stringify(promptFile)}, process.argv[i + 1]);
+fs.writeFileSync(${JSON.stringify(promptFile)}, fs.readFileSync(0, 'utf8'));   // the prompt comes on stdin
 fs.writeFileSync(${JSON.stringify(path.join(bin, 'argv.json'))}, JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd() }));
 process.stdout.write(JSON.stringify({ result: ${JSON.stringify(JSON.stringify(reply))}, total_cost_usd: 0.0123 }));
 `, { mode: 0o755 });
@@ -90,6 +89,7 @@ process.stdout.write(JSON.stringify({ result: ${JSON.stringify(JSON.stringify(re
     const { argv, cwd } = JSON.parse(await fs.readFile(path.join(bin, 'argv.json'), 'utf8'));
     assert.deepEqual(argv.slice(argv.indexOf('--model'), argv.indexOf('--model') + 2), ['--model', 'opus']);
     assert.ok(argv.includes('dontAsk') && argv.includes('--max-turns'));
+    assert.ok(!argv.some((x) => x.includes('WebFetch')), 'the prompt is not on the command line (ps, ARG_MAX)');
     assert.ok(path.basename(cwd).startsWith('saut-review-') && !cwd.startsWith(root), 'the reviewer runs in an empty directory, not the project');
 
     const reviews = await fs.readdir(path.join(process.env.SAUT_HOME, 'results')).then((ds) => ds.find((d) => d.startsWith('fx-dead--')));

@@ -43,7 +43,7 @@ function parseSarif(stdout: string, target: string, id: string): Diagnostic[] {
         severity: sev(String(res.level ?? 'warning')),
         message: `${String(res.message?.text ?? '').slice(0, 400)} [${id}]`,
         path: loc?.artifactLocation?.uri ? path.resolve(target, String(loc.artifactLocation.uri)) : target,
-        line: loc?.region?.startLine,
+        line: Number.isInteger(loc?.region?.startLine) ? loc.region.startLine : undefined,
         precedent: id,
       });
     }

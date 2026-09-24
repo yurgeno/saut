@@ -9,7 +9,7 @@
 //
 // The reviewer runs `claude -p` in an empty directory (no project instructions, no skills),
 // one turn, `dontAsk` — it has no tool it could use. Its cost is what the harness reports.
-import { execFile } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -24,6 +24,9 @@ export interface Review { model: string; costUsd: number | null; summary: string
 export const MAX_CHANGES = 8;
 export const DEFAULT_REVIEW_MODEL = 'sonnet';
 const TIMEOUT_MS = 240_000;
+const MAX_OUTPUT = 16 * 1024 * 1024;
+// A review is one file plus its findings; a prompt beyond this is a mistake, not a skill.
+export const MAX_PROMPT_TOKENS = 150_000;
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 interface GuidanceRule { class: 'A' | 'B' | 'D'; verifiedAt: string; sources: string[]; appliesTo?: string }
@@ -92,20 +95,34 @@ export function applyChange(text: string, c: { search: string; replace: string }
 }
 
 // One `claude -p` call in an empty directory: no project instructions, no skills, no tools.
+// The prompt goes on stdin — not on the command line, where it would show in `ps` and hit the
+// OS argument limit.
 export async function runReviewer(prompt: string, model: string): Promise<{ reply: string; costUsd: number | null }> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'saut-review-'));
   try {
     const stdout = await new Promise<string>((resolve, reject) => {
-      execFile('claude', ['-p', prompt, '--model', model, '--output-format', 'json', '--max-turns', '1', '--permission-mode', 'dontAsk', '--setting-sources', 'project'],
-        { cwd: dir, env: { ...process.env, NO_COLOR: '1' }, maxBuffer: 16 * 1024 * 1024, timeout: TIMEOUT_MS, killSignal: 'SIGKILL' },
-        (err, out) => {
-          if (err && (err as NodeJS.ErrnoException).code === 'ENOENT') return reject(new Error('the `claude` CLI is not on PATH — the review runs on Claude Code'));
-          if (err && !out) return reject(new Error(`the reviewer did not run: ${err.message.slice(0, 200)}`));
-          resolve(String(out));
-        });
+      const child = spawn('claude', ['-p', '--model', model, '--output-format', 'json', '--max-turns', '1', '--permission-mode', 'dontAsk', '--setting-sources', 'project'],
+        { cwd: dir, env: { ...process.env, NO_COLOR: '1' }, stdio: ['pipe', 'pipe', 'pipe'] });
+      let out = '', err = '', size = 0, settled = false;
+      const done = (e: Error | null, v?: string) => { if (settled) return; settled = true; clearTimeout(timer); e ? reject(e) : resolve(v!); };
+      const timer = setTimeout(() => { child.kill('SIGKILL'); done(new Error(`the reviewer did not answer within ${TIMEOUT_MS / 1000}s`)); }, TIMEOUT_MS);
+      child.stdout.on('data', (d: Buffer) => { size += d.length; if (size > MAX_OUTPUT) { child.kill('SIGKILL'); done(new Error('the reviewer replied with more than 16 MB')); } else out += d; });
+      child.stderr.on('data', (d: Buffer) => { if (err.length < 4000) err += d; });
+      child.on('error', (e: NodeJS.ErrnoException) => done(e.code === 'ENOENT' ? new Error('the `claude` CLI is not on PATH — the review runs on Claude Code') : new Error(`the reviewer did not run: ${e.message.slice(0, 200)}`)));
+      child.on('close', (code) => {
+        if (out) return done(null, out);
+        done(new Error(`the reviewer did not run: exit ${code}${err ? ` — ${err.trim().slice(0, 200)}` : ''}`));
+      });
+      child.stdin.on('error', () => { /* the CLI exited before reading; 'close' reports it */ });
+      child.stdin.end(prompt);
     });
     let reply = stdout, costUsd: number | null = null;
-    try { const j = JSON.parse(stdout); reply = String(j.result ?? ''); costUsd = typeof j.total_cost_usd === 'number' ? j.total_cost_usd : null; } catch { /* plain text */ }
+    let j: any = null;
+    try { j = JSON.parse(stdout); } catch { /* plain text */ }
+    if (j && typeof j === 'object') {
+      if (j.is_error) throw new Error(`the reviewer failed: ${String(j.result ?? j.subtype ?? 'unknown error').slice(0, 300)}`);
+      reply = String(j.result ?? ''); costUsd = typeof j.total_cost_usd === 'number' ? j.total_cost_usd : null;
+    }
     return { reply, costUsd };
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
 }

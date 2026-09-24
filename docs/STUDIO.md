@@ -7,7 +7,9 @@ saut studio ~/my-pack --port 7391 --deployment myproject
 
 A local page over the same library functions the CLI verbs call: nothing here re-implements a
 rule, a cost model or a runner. It opens on `127.0.0.1` with an ephemeral port and prints the
-URL; `Ctrl-C` stops it.
+address to open — it carries a one-time key (`/?k=…`); the browser trades it for a cookie and
+the key leaves the address bar, so a reload works and the address without the key opens
+nothing. `Ctrl-C` stops it.
 
 The header names what the root is — a skills folder, a TAUT pack, or a compiled workspace — and
 carries the **target harnesses**: the matrix, the findings and the bench follow that choice
@@ -81,7 +83,8 @@ unsaved**); nothing is written.
   once), applies in memory and re-lints: the card says which findings it resolves and which it
   introduces, with the diff. **Apply to editor** puts it into the Source view as an unsaved
   edit — then Save (A, D) or measure it in the Bench (B). Nothing is written by the review, and
-  it runs in an empty directory with no tools; the review is kept for the record under
+  it runs in an empty directory with no tools, the prompt on its stdin (never on the command
+  line); a prompt over 150 000 tokens is refused. The review is kept for the record under
   `~/.saut/results/<artifact>/reviews/`. It sends the file to Claude through your Claude Code
   login — the same as asking Claude Code about it; mind that for confidential material. Without
   the `claude` CLI the section says so.
@@ -122,6 +125,10 @@ For the artifact open in the Skill view.
 - **Validate pack** runs the pack's own `tools/validate-pack.sh` (compile + verify + the SAUT
   step) and shows its output verbatim.
 
+One bench runs at a time: a second Run or Measure while one is running is refused, not queued
+behind a paid run. A model name must look like one (a value such as `--auto` would reach a
+harness CLI as a flag), and the cost ceiling must be a number.
+
 Paths in the bench log and in the results the page receives are shown as `<root>`, `<tmp>` and
 `~`; the page is not told where anything lives.
 
@@ -137,6 +144,9 @@ degradations and the documentation it was derived from.
 A mutating localhost UI, so it mirrors the TAUT panel's contour:
 
 - binds `127.0.0.1` only;
+- the page is served only through the printed address: its one-time key becomes an
+  `HttpOnly`, `SameSite=Strict` cookie — a local process that finds the port gets no page, so
+  no token;
 - a per-session token, generated at start, carried in the page's `<meta>` and required in a
   **custom** request header on every `/api` call — which forces a CORS preflight that is never
   answered;
@@ -145,12 +155,20 @@ A mutating localhost UI, so it mirrors the TAUT panel's contour:
   request chooses;
 - an `Origin` check on POST and a `Host` check on everything (DNS-rebinding guard);
 - no CORS headers are ever sent, so a foreign page can read nothing; the page cannot be framed;
-- writes are contained under the root the studio was started with (symlinks resolved), only
-  to a `SKILL.md`, an agent `.md`, a case `prompt.md` or `saut.json`, never to a file sealed by
-  `taut.lock`;
+- reads and writes are contained under the root the studio was started with (symlinks
+  resolved) and take only a skill's `SKILL.md` or an agent `.md` in an agents directory — not a
+  README, a `CLAUDE.md`, a command file or anything else under the root; the only other files
+  written are a case `prompt.md` and `saut.json`, never a file sealed by `taut.lock`;
+- an existing file is replaced atomically (a temporary file renamed over it, its mode kept),
+  never written through a symlink, and re-hashed just before the rename — an edit saved
+  meanwhile elsewhere is refused, not overwritten; the before/after bench copies files, never
+  links, so a variant cannot reach the project through one;
+- a suppression goes into the nearest `saut.json`; when that one lies above the root the
+  Studio says so rather than create a new one that would hide it;
 - paths cross the API relative to the root — the page is never told where the root lives;
 - the SSE stream carries the token in its query (EventSource cannot set headers) and is
-  read-only.
+  read-only; no other route accepts the token in a query;
+- errors name files relative to the root, never where the root lives.
 
 The page never sees a secret: the tool registry carries names, and `--live` discovery (spawning
 catalog MCP servers) stays a CLI action. The editor is CodeMirror 6 (MIT), bundled into

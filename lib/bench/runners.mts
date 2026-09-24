@@ -20,6 +20,11 @@ export interface RunSpec {
   rawDir: string;
 }
 
+// A model id as a harness CLI takes it: `sonnet`, `claude-opus-5-5`, `opus[1m]`,
+// `openai/gpt-6-sol`. Never starts with a dash — a value like `--auto` would reach a harness
+// CLI as a flag, not as a model.
+export const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:\/\[\]@-]{0,99}$/;
+
 export const DEFAULT_MODEL: Record<string, string | undefined> = { 'claude-code': 'haiku', codex: 'gpt-6-luna', opencode: undefined };
 
 export const which = onPath;

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { loadHarnesses } from './caps.mts';
 import { costOf, estimateTokens, overBudget, validateBudgets } from './cost.mts';
 import { lintArtifact, matrix, sortDiags, toSarif } from './lint.mts';
-import { explain } from './rules.mts';
+import { explain, RULES } from './rules.mts';
 import { active, applySuppressions, loadSuppressions, namesOf } from './suppress.mts';
 import { deploymentOf, guidanceStatus, lintGuidance, lintModelTiers, localCatalogs, sandboxedAgents } from './guidance.mts';
 import { applyFix, lineDiff } from './fix.mts';
@@ -16,6 +16,7 @@ import { scan } from './scan.mts';
 import { readUsage, usageFor, type UsageData } from './usage.mts';
 import { catalogServers, detectTaut, lintWiring, previews, refine, type TautContext, type TautPreview } from './adapters/taut.mts';
 import { runBench } from './bench/bench.mts';
+import { MODEL_ID } from './bench/runners.mts';
 import { newResultsDir } from './bench/results.mts';
 import { startStudio } from './studio/server.mts';
 import type { BenchResult } from './bench/types.mts';
@@ -149,7 +150,10 @@ export async function runLint(targets: string[], opts: Opts): Promise<{ diagnost
   }
   // saut.json suppressions: marked, not dropped; a stale one is reported
   const suppressions = await loadSuppressions(taut ? taut.packRoot : path.resolve(targets[0] ?? '.'));
-  const marked = applySuppressions(diagnostics, namesOf(artifacts), suppressions);
+  // linting part of what saut.json covers: only the linted artifacts' entries can be unused
+  const scope = suppressions.file ? path.dirname(suppressions.file) : null;
+  const whole = !scope || (targets.length ? targets : ['.']).some((t) => { const r = path.relative(path.resolve(t), scope); return r === '' || (!r.startsWith('..') && !path.isAbsolute(r)); });
+  const marked = applySuppressions(diagnostics, namesOf(artifacts), suppressions, whole ? {} : { only: new Set(artifacts.map((a) => a.name)) });
   return { diagnostics: sortDiags(explain(marked)), artifacts, harnesses, taut, note, ignored, scanNote, scanners };
 }
 
@@ -212,6 +216,8 @@ async function cmdFix(opts: Opts): Promise<number> {
   const { diagnostics, artifacts } = await runLint(opts._, opts);
   const known = new Set(artifacts.map((a) => a.path));        // write only files the walk found
   const only = new Set((opts.only ?? '').split(',').map((x) => x.trim()).filter(Boolean));
+  const unknown = [...only].filter((x) => !Object.hasOwn(RULES, x));
+  if (unknown.length) { process.stderr.write(`--only: no rule ${unknown.map((x) => `"${x}"`).join(', ')} — see docs/RULES.md\n`); return 2; }
   const byPath = new Map<string, Diagnostic[]>();
   for (const x of diagnostics) if (x.autofix && !x.suppressed && known.has(x.path)) byPath.set(x.path, [...(byPath.get(x.path) ?? []), x]);
   const files: { path: string; applied: string[]; skipped: { fix: string; reason: string }[]; diff: string; written: boolean }[] = [];
@@ -454,6 +460,12 @@ export async function cmdTest(opts: Opts): Promise<number> {
   if (!opts.json) process.stderr.write(`${c.bold(`bench ${a.kind} ${a.name}`)} ${c.dim(`level ${level} · runs ${opts.runs ?? 1} · ${taut ? `TAUT pack ${rel(taut.packRoot)} via ${rel(taut.engine)}` : 'generic'} · harnesses ${harnesses.filter((h) => h.runner).map((h) => h.id).join(',')}`)}\n`);
   // --model sonnet (every harness) or --model claude-code=sonnet,codex=gpt-6-sol (per harness)
   const perHarness = opts.model?.includes('=') ? Object.fromEntries(opts.model.split(',').map((x) => x.split('=').map((s) => s.trim())).filter(([k, v]) => k && v)) : undefined;
+  const ids = new Set(harnesses.map((h) => h.id));
+  for (const [h, m] of (perHarness ? Object.entries(perHarness) : opts.model ? [['', opts.model]] : []) as [string, string][]) {
+    if (h && !ids.has(h)) { process.stderr.write(`--model ${h}=${m}: no harness "${h}" (known: ${[...ids].join(', ')})\n`); return 2; }
+    if (!MODEL_ID.test(m)) { process.stderr.write(`--model: "${m}" is not a model id\n`); return 2; }
+  }
+  if (perHarness && opts.model!.split(',').some((x) => !x.includes('='))) { process.stderr.write('--model: use either one model for every harness, or harness=model pairs — not both\n'); return 2; }
   const meta = opts.label || opts.pair ? { ...(opts.label ? { label: opts.label } : {}), ...(opts.pair ? { pair: opts.pair } : {}) } : undefined;
   const result = await runBench({
     artifact: a, siblings, harnesses, taut, level, runs: opts.runs ?? 1, model: perHarness ? undefined : opts.model, models: perHarness, meta, judgeModel: opts.judgeModel, maxCostUsd: opts.maxCost ?? null,
@@ -504,9 +516,8 @@ export async function cmdStudio(opts: Opts): Promise<number> {
   const root = path.resolve(opts._[0] ?? '.');
   if (!(await isDir(root))) { process.stderr.write(`saut studio <dir>: ${root} is not a directory\n`); return 2; }
   const h = await startStudio(root, opts);
-  const url = `http://127.0.0.1:${h.port}/`;
-  process.stdout.write(`${c.bold('SAUT Studio')} ${url}\n`);
-  process.stdout.write(c.dim(`  root ${rel(root)} · loopback only · per-session token · Ctrl-C to stop\n`));
+  process.stdout.write(`${c.bold('SAUT Studio')} ${h.url}\n`);
+  process.stdout.write(c.dim(`  root ${rel(root)} · loopback only · the address carries a one-time key · Ctrl-C to stop\n`));
   await new Promise(() => undefined);          // serve until interrupted
   return 0;
 }

@@ -33,17 +33,20 @@ export interface GuidanceStatus {
   parts: { what: string; verifiedAt: string; ageDays: number; stale: boolean; sources: string[] }[];
 }
 
-const days = (iso: string, now: Date) => Math.floor((now.getTime() - Date.parse(`${iso}T00:00:00Z`)) / 86_400_000);
+// Days since a YYYY-MM-DD date. A date that is not one (a typo in the data) is NaN, and a NaN
+// age counts as stale — an unreadable date must never read as fresh.
+const days = (iso: string, now: Date) => /^\d{4}-\d{2}-\d{2}$/.test(iso) ? Math.floor((now.getTime() - Date.parse(`${iso}T00:00:00Z`)) / 86_400_000) : NaN;
+const tooOld = (age: number, max: number) => !(age <= max);
 
 export function guidanceStatus(harnesses: HarnessCaps[], now = new Date()): GuidanceStatus {
   const max = DATA.maxAgeDays;
   const parts: GuidanceStatus['parts'] = [];
   for (const h of harnesses) if (h.models)
-    parts.push({ what: `${h.title} models`, verifiedAt: h.models.verifiedAt, ageDays: days(h.models.verifiedAt, now), stale: days(h.models.verifiedAt, now) > max, sources: h.models.sources });
+    parts.push({ what: `${h.title} models`, verifiedAt: h.models.verifiedAt, ageDays: days(h.models.verifiedAt, now), stale: tooOld(days(h.models.verifiedAt, now), max), sources: h.models.sources });
   const own = Object.values(DATA.rules).filter((r) => r.verifiedAt !== 'harness');
   if (own.length) {
     const oldest = own.map((r) => r.verifiedAt).sort()[0];
-    parts.push({ what: 'prompting guidance', verifiedAt: oldest, ageDays: days(oldest, now), stale: days(oldest, now) > max, sources: [...new Set(own.flatMap((r) => r.sources))] });
+    parts.push({ what: 'prompting guidance', verifiedAt: oldest, ageDays: days(oldest, now), stale: tooOld(days(oldest, now), max), sources: [...new Set(own.flatMap((r) => r.sources))] });
   }
   const oldest = parts.map((p) => p.verifiedAt).sort()[0] ?? now.toISOString().slice(0, 10);
   return { verifiedAt: oldest, ageDays: days(oldest, now), maxAgeDays: max, stale: parts.some((p) => p.stale), parts };
@@ -176,9 +179,10 @@ export function lintGuidance(a: Artifact, o: GuidanceOptions): Diagnostic[] {
   }
 
   const lines = a.body.split('\n');
+  const bodyLines = lines.length - (a.body.endsWith('\n') ? 1 : 0);     // the empty string after the final newline is not a line
   const at = (i: number) => a.fm.bodyOffset + i;
-  if (a.kind === 'skill' && lines.length > SPEC_BODY_MAX_LINES)
-    d('body-over-spec', 'medium', `the body is ${lines.length} lines — the guidance keeps SKILL.md under ${SPEC_BODY_MAX_LINES} and moves detail into referenced files`, { line: at(SPEC_BODY_MAX_LINES) });
+  if (a.kind === 'skill' && bodyLines > SPEC_BODY_MAX_LINES)
+    d('body-over-spec', 'medium', `the body is ${bodyLines} lines — the guidance keeps SKILL.md under ${SPEC_BODY_MAX_LINES} and moves detail into referenced files`, { line: at(SPEC_BODY_MAX_LINES) });
 
   const prose = proseLines(a.body);
   const phrase = prose.findIndex((l) => UNDERTRIGGER_PHRASE.test(l));
