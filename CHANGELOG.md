@@ -3,7 +3,20 @@
 All notable changes to SAUT. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions are [semantic](https://semver.org/) and each release is tagged.
 
-## [Unreleased]
+## [0.7.0] — 2026-09-24
+
+The Studio becomes a workbench: every finding says how to fix it, mechanical fixes apply
+through a diff, vendor guidance is dated data, the bench measures an edit before and after, a
+finding can be suppressed with a reason, and an agent review proposes changes that SAUT checks
+before they reach the editor. An enterprise review hardened the whole surface.
+
+**Upgrading:**
+- `saut studio` prints an address with a one-time key (`/?k=…`) — open that one; the bare
+  address answers 403.
+- Bench results are written to `~/.saut/results/` (`$SAUT_HOME`), not under the artifact;
+  run ids carry milliseconds. Earlier results stay where they were.
+- The Studio reads and writes only skill `SKILL.md` and agent files.
+- `--model` / `--only` values that were silently ignored are now usage errors (exit 2).
 
 ### Added
 
@@ -173,6 +186,8 @@ Studio (browser):
   by `ARG_MAX`); a prompt over 150 000 tokens is refused, and a reply flagged as an error is
   shown as one.
 - `close()` no longer waits for open event streams, and stops a bench child still running.
+
+[0.7.0]: https://github.com/yurgeno/saut/releases/tag/v0.7.0
 
 ## [0.6.4] — 2026-09-23
 

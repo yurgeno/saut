@@ -35,5 +35,5 @@ keywords:
   - opencode
 repository-code: "https://github.com/yurgeno/saut"
 license: Apache-2.0
-version: 0.6.0
-date-released: '2026-09-03'
+version: 0.7.0
+date-released: '2026-09-24'

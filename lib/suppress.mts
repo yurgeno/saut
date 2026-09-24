@@ -1,6 +1,6 @@
 // Suppressing a finding — with a reason, in saut.json, never in the artifact the model reads.
 //
-//   { "suppress": [ { "rule": "injection-heuristic", "artifact": "upe-check",
+//   { "suppress": [ { "rule": "injection-heuristic", "artifact": "env-check",
 //                     "match": "never echo credentials", "reason": "prose, not a read — …" } ] }
 //
 // A suppressed finding is not deleted: it stays in every output marked `suppressed` with its

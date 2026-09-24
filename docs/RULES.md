@@ -145,8 +145,8 @@ carries cost budgets), never in the artifact itself:
 ```json
 {
   "suppress": [
-    { "rule": "dead-privilege", "artifact": "upe-check", "match": "mcp__playwright__browser_navigate",
-      "reason": "upe-check calls the cheapest read-only tool of every allowed MCP server without naming it" }
+    { "rule": "dead-privilege", "artifact": "env-check", "match": "mcp__playwright__browser_navigate",
+      "reason": "env-check calls the cheapest read-only tool of every allowed MCP server without naming it" }
   ]
 }
 ```
