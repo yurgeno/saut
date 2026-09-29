@@ -3,6 +3,26 @@
 All notable changes to SAUT. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions are [semantic](https://semver.org/) and each release is tagged.
 
+## [0.7.2] — 2026-09-29
+
+### Changed
+
+- **Claude Sonnet 5.5 in the Claude Code model catalog.** `sonnet` (and `sonnet[1m]`) now
+  resolve to `claude-sonnet-5-5` — the alias target from Claude Code 2.1.284 on the Anthropic
+  API. The catalog lists it as current (five effort levels, default `medium`); `claude-sonnet-5`
+  moves to previous, so a skill or agent pinned to it gets `model-previous` with `sonnet` as the
+  replacement. Catalog re-verified 2026-09-29.
+- **Guidance.** `reasoning-echo` now applies to Sonnet 5.5 as well: its safeguards decline
+  requests to reproduce internal reasoning (`reasoning_extraction`), and the vendor says to remove
+  such instructions. `aggressive-imperative` covers Sonnet 5.x. Both re-verified 2026-09-29.
+
+Sources: [What's new in Claude Sonnet 5.5](https://platform.claude.com/docs/en/models/sonnet-5-5/whats-new-sonnet-5-5),
+[Prompting Claude Sonnet 5.5](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-sonnet-5-5),
+[Claude Code model configuration](https://code.claude.com/docs/en/model-config),
+[Claude Code changelog 2.1.284](https://code.claude.com/docs/en/changelog).
+
+[0.7.2]: https://github.com/yurgeno/saut/releases/tag/v0.7.2
+
 ## [0.7.1] — 2026-09-24
 
 ### Fixed

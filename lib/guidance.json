@@ -11,8 +11,8 @@
       "sources": ["https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices", "https://agentskills.io/specification"]
     },
     "aggressive-imperative": {
-      "class": "B", "verifiedAt": "2026-09-23",
-      "appliesTo": "Claude Opus 5.5, Sonnet 5, Fable 5.x; GPT-6 Astra",
+      "class": "B", "verifiedAt": "2026-09-29",
+      "appliesTo": "Claude Opus 5.5, Sonnet 5.x, Fable 5.x; GPT-6 Astra",
       "sources": [
         "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices",
         "https://github.com/anthropics/skills/blob/main/skills/claude-api/shared/prompt-audit.md",
@@ -24,9 +24,9 @@
       "sources": ["https://github.com/anthropics/skills/blob/main/skills/claude-api/shared/prompt-audit.md"]
     },
     "reasoning-echo": {
-      "class": "B", "verifiedAt": "2026-09-23",
-      "appliesTo": "Claude Fable 5.x, Opus 5.5",
-      "sources": ["https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5-5"]
+      "class": "B", "verifiedAt": "2026-09-29",
+      "appliesTo": "Claude Fable 5.x, Opus 5.5, Sonnet 5.5",
+      "sources": ["https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5-5", "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-sonnet-5-5"]
     },
     "codex-agent-sandbox": {
       "class": "D", "verifiedAt": "2026-09-23",
