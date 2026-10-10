@@ -131,12 +131,13 @@
     }
   ],
   "models": {
-    "verifiedAt": "2026-09-29",
+    "verifiedAt": "2026-10-10",
     "sources": [
       "https://code.claude.com/docs/en/model-config",
-      "https://code.claude.com/docs/en/sub-agents"
+      "https://code.claude.com/docs/en/sub-agents",
+      "https://code.claude.com/docs/en/changelog"
     ],
-    "note": "Alias resolution is the Anthropic API one; on Bedrock, Vertex, Foundry and the AWS platform `opus`/`sonnet` can resolve to older models (model-config). `model:` and `effort:` are honoured in skill and subagent frontmatter.",
+    "note": "Alias resolution is the Anthropic API one; on Bedrock, Vertex, Foundry and the AWS platform `opus`/`sonnet` can resolve to older models and `haiku` resolves to Haiku 4.5 (model-config). `haiku` → Haiku 5.5 needs Claude Code 2.1.293 or newer. `model:` and `effort:` are honoured in skill and subagent frontmatter.",
     "efforts": [
       "low",
       "medium",
@@ -147,7 +148,7 @@
     "aliases": {
       "opus": "claude-opus-5-5",
       "sonnet": "claude-sonnet-5-5",
-      "haiku": "claude-haiku-4-5",
+      "haiku": "claude-haiku-5-5",
       "fable": "claude-fable-5-1",
       "opus[1m]": "claude-opus-5-5",
       "sonnet[1m]": "claude-sonnet-5-5",
@@ -193,10 +194,16 @@
         "defaultEffort": "medium"
       },
       {
-        "id": "claude-haiku-4-5",
+        "id": "claude-haiku-5-5",
         "status": "current",
-        "efforts": [],
-        "note": "no effort levels — an effort setting has no effect"
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "defaultEffort": "medium"
       },
       {
         "id": "claude-fable-5",
@@ -221,6 +228,13 @@
           "max"
         ],
         "replacement": "opus"
+      },
+      {
+        "id": "claude-haiku-4-5",
+        "status": "previous",
+        "efforts": [],
+        "note": "still what `haiku` resolves to on Bedrock, Google Cloud, Foundry and Claude Platform on AWS; takes no effort levels",
+        "replacement": "haiku"
       },
       {
         "id": "claude-sonnet-5",

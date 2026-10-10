@@ -127,7 +127,8 @@ on that case, instead of reporting a 0 % trigger rate the description cannot fix
 - Codex runs `--sandbox read-only --ephemeral`;
   opencode gets deny-by-default permissions; Claude runs `--permission-mode dontAsk` with the
   grant above and `--setting-sources project`.
-- Cheap models by default (`haiku`, `gpt-6-luna` — needs Codex CLI 0.156.1 or newer). `--model`
+- Cheap models by default (`haiku` — Haiku 5.5 on the Anthropic API with Claude Code 2.1.293 or
+  newer, Haiku 4.5 elsewhere; `gpt-6-luna` — needs Codex CLI 0.156.1 or newer). `--model`
   overrides: one id for every harness, or one per harness —
   `--model claude-code=sonnet,codex=gpt-6-sol` (a Claude alias means nothing to Codex). The
   model each harness ran is recorded in the result. `--max-cost <usd>`

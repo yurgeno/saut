@@ -66,7 +66,7 @@ before and after · **D** a hardening the artifact does not use yet.
 | `model-unsupported` | A | high | the model is marked unsupported or retired — runs pinned to it fail | harness catalog; measured 2026-09-23 (`gpt-5.6` → HTTP 400) |
 | `model-unknown` | A | medium | neither the registry nor the local catalog knows the model — a typo, or newer than the registry | harness catalog |
 | `model-previous` | A | low | a pinned previous or legacy model; names the current one (review autofix: set `model`) | harness catalog |
-| `effort-unsupported` | A | medium | an effort level the harness does not know, or one the model does not take (Haiku takes none; Opus 4.6 has no `xhigh`) | Claude Code model-config; Codex catalog |
+| `effort-unsupported` | A | medium | an effort level the harness does not know, or one the model does not take (Haiku 4.5 takes none; Opus 4.6 has no `xhigh`) | Claude Code model-config; Codex catalog |
 | `body-over-spec` | A | medium | a SKILL.md body over 500 lines | Agent Skills best practices |
 | `aggressive-imperative` | B | low | an undertrigger-era instruction ("use PROACTIVELY", "unprompted", "if in doubt, use") or ≥ 5 all-caps imperatives at ≥ 3 per 1,000 words of prose (thresholds calibrated on one production pack) | Claude prompting best practices, prompt audit; GPT-6 prompting guide |
 | `incident-fossil` | B | low | two or more dated incident/measurement stories in the body | prompt audit |

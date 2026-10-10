@@ -3,6 +3,33 @@
 All notable changes to SAUT. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions are [semantic](https://semver.org/) and each release is tagged.
 
+## [0.7.3] — 2026-10-10
+
+### Changed
+
+- **Claude Haiku 5.5 in the Claude Code model catalog.** `haiku` now resolves to
+  `claude-haiku-5-5` — the alias target from Claude Code 2.1.293 on the Anthropic API. The
+  catalog lists it as current with five effort levels (default `medium`); it is the first Haiku
+  that takes effort, so `haiku` with an `effort:` is no longer `effort-unsupported`.
+  `claude-haiku-4-5` moves to previous: a skill or agent pinned to it gets `model-previous` with
+  `haiku` as the replacement, and an effort on it is still `effort-unsupported`. On Bedrock,
+  Google Cloud, Foundry and Claude Platform on AWS `haiku` still resolves to Haiku 4.5 (catalog
+  note). Catalog re-verified 2026-10-10.
+- **Bench defaults.** The cheap Claude model and the L4 judge stay the `haiku` alias, so they
+  now run Haiku 5.5 on Claude Code 2.1.293 or newer. Haiku 5.5 thinks by default and its
+  tokenizer counts the same text as about 30 % more tokens, so per-run cost and token totals
+  shift against earlier Haiku 4.5 results — re-baseline before comparing.
+- **Guidance unchanged.** `reasoning-echo` is not extended to Haiku 5.5: its safeguard
+  categories are `cyber`, `bio`, `frontier_llm` and `general_harms`, without
+  `reasoning_extraction`.
+
+Sources: [Claude Code model configuration](https://code.claude.com/docs/en/model-config),
+[Claude Code changelog 2.1.293](https://code.claude.com/docs/en/changelog),
+[What's new in Claude Haiku 5.5](https://platform.claude.com/docs/en/models/haiku-5-5/whats-new-haiku-5-5),
+[Prompting Claude Haiku 5.5](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-haiku-5-5).
+
+[0.7.3]: https://github.com/yurgeno/saut/releases/tag/v0.7.3
+
 ## [0.7.2] — 2026-09-29
 
 ### Changed

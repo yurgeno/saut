@@ -25,13 +25,17 @@ test('registry: every model block is dated and sourced, and statuses are known',
 
 test('Claude Code models: aliases, dated ids, previous models, effort per model', () => {
   assert.deepEqual(codes(judgeModel(cc, 'opus', 'xhigh', null)), []);
-  assert.deepEqual(codes(judgeModel(cc, 'claude-haiku-4-5-20251001', null, null)), [], 'a dated id is the same model');
+  const dated = judgeModel(cc, 'claude-haiku-4-5-20251001', null, null);
+  assert.deepEqual(codes(dated), ['model-previous'], 'a dated id is the same model');
+  assert.equal(dated[0].autofixModel, 'haiku');
   assert.deepEqual(codes(judgeModel(cc, 'sonnet[1m]', 'high', null)), []);
   assert.deepEqual(codes(judgeModel(cc, 'inherit', 'max', null)), [], 'a dynamic alias is judged against every level the harness knows');
   assert.deepEqual(codes(judgeModel(cc, 'inherit', 'ultra', null)), ['effort-unsupported'], 'ultra is a Codex level, not a Claude one');
-  const haiku = judgeModel(cc, 'haiku', 'low', null);
-  assert.deepEqual(codes(haiku), ['effort-unsupported']);
-  assert.match(haiku[0].message, /claude-haiku-4-5\) has no effort levels/);
+  assert.deepEqual(codes(judgeModel(cc, 'haiku', 'low', null)), [], 'haiku is Haiku 5.5, which takes effort');
+  assert.deepEqual(codes(judgeModel(cc, 'claude-haiku-5-5', 'max', null)), []);
+  const haiku45 = judgeModel(cc, 'claude-haiku-4-5', 'low', null);
+  assert.deepEqual(codes(haiku45), ['model-previous', 'effort-unsupported']);
+  assert.match(haiku45[1].message, /claude-haiku-4-5 has no effort levels/);
   assert.deepEqual(codes(judgeModel(cc, 'claude-opus-4-6', 'xhigh', null)), ['model-previous', 'effort-unsupported'], 'Opus 4.6 has no xhigh');
   const prev = judgeModel(cc, 'claude-opus-4-7', null, null);
   assert.equal(prev[0].autofixModel, 'opus');
@@ -80,10 +84,10 @@ test('a TAUT model ladder: the pre-2026-09-23 ladder is caught, line by line', (
   const got = ds.map((x) => `${x.code}:${x.line}`);
   const line = (s) => text.split('\n').findIndex((l) => l.includes(s)) + 1;
   assert.ok(got.includes(`model-unsupported:${line('"codex": "gpt-5.6"')}`), got.join(' '));
-  assert.ok(got.includes(`effort-unsupported:${line('"claude-code": "low"')}`), 'haiku takes no effort');
+  assert.ok(!got.some((g) => g.startsWith('effort-unsupported')), 'haiku (Haiku 5.5) takes effort low');
   assert.ok(got.includes(`model-previous:${line('"codex": "gpt-5.6-luna"')}`));
   assert.ok(ds.every((x) => x.guidance.class === 'A' && x.guidance.verifiedAt && x.guidance.sources.length));
-  assert.equal(ds.length, 3);
+  assert.equal(ds.length, 2);
 });
 
 const art = (over = {}) => ({

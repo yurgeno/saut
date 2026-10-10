@@ -181,7 +181,7 @@ export const RULES: Record<string, RuleInfo> = {
   'effort-unsupported': {
     category: 'guidance', title: 'Effort level the model does not take',
     why: 'An effort the model does not support is ignored or rejected; the author believes a setting is in force that is not.',
-    fix: 'Use a level the model lists, or remove `effort` for a model that takes none (e.g. Haiku).',
+    fix: 'Use a level the model lists, or remove `effort` for a model that takes none (e.g. Haiku 4.5).',
   },
   'body-over-spec': {
     category: 'guidance', title: 'Skill body over 500 lines',
