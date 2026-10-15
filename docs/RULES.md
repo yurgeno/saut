@@ -17,7 +17,7 @@ harness, what the declared allowlist actually is there — `restrict`, `grant`, 
 | `supervised-but-auto` | high | the body demands supervision ("SUPERVISED, always", "never unattended") but the model may invoke the skill | S2 |
 | `unreachable` | high | `user-invocable: false` and `disable-model-invocation: true` | — |
 | `dead-privilege` | medium | a granted tool the body never evidences (an MCP name, the server or the tool's first word; a builtin via prose evidence — shell commands for Bash, "spawn the subagent" for Agent…). Read/Glob/Grep/Skill/AskUserQuestion are ambient and never dead; scoped rules (`Bash(git diff *)`) are deliberate and skipped | S4 |
-| `body-tool-not-allowed` | high (MCP) / medium (builtin) | the body cites a tool (`mcp__…`, or a backticked builtin) the allowlist does not carry — the harness will lack it or prompt: silent degradation | C1 |
+| `body-tool-not-allowed` | high (MCP) / medium (builtin) | the body cites a tool (`mcp__…`, or a backticked builtin not right after a prohibition such as "No `AskUserQuestion`") the allowlist does not carry — the harness will lack it or prompt: silent degradation | C1 |
 | `unknown-tool` | high | an allowlist name that is neither a builtin of the harness nor `mcp__…` — a dead name grants nothing | — |
 | `legacy-tool` | info | a builtin name from older harness versions (`MultiEdit`, `LS`, …) | — |
 | `unknown-mcp-server` / `unknown-mcp-tool` | high | `mcp__server__tool` where the catalog lists no such server / no such tool for it (only when a catalog is present) | C1 |

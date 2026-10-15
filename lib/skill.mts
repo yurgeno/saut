@@ -188,17 +188,26 @@ export const TOOL_EVIDENCE: Record<string, RegExp> = {
 };
 export const AMBIENT_TOOLS = new Set(['Read', 'Glob', 'Grep', 'Skill', 'AskUserQuestion', 'ToolSearch', 'TaskOutput', 'TaskStop', 'TodoWrite', 'ExitPlanMode', 'EnterPlanMode']);
 
+// A tool named right after a prohibition on its own line ("No `AskUserQuestion`", "never call
+// the `Agent` tool") is a ban, not a use — it must not count as the body using the tool.
+const NEGATED_BEFORE = /\b(?:no|not|never|without|avoid|forbidden|don't|do not|must not|mustn't)(?:\s+(?:use|call|invoke|run|using|calling|invoking))?(?:\s+the)?\s*$/i;
+
 // Tool mentions in a body: fully-qualified MCP names always; builtin names only when the
 // text treats them as an identifier (backticks, `Tool(`, or "the Tool tool") — plain prose
-// like "read the file" is not a Read reference. `evidence` = prose evidence per TOOL_EVIDENCE.
-export function bodyToolMentions(body: string, builtins: Iterable<string>): { mcp: Set<string>; builtin: Set<string>; evidence: Set<string> } {
+// like "read the file" is not a Read reference, nor is a negated mention. `builtinAt` = the
+// body index of the first such mention. `evidence` = prose evidence per TOOL_EVIDENCE.
+export function bodyToolMentions(body: string, builtins: Iterable<string>): { mcp: Set<string>; builtin: Set<string>; builtinAt: Map<string, number>; evidence: Set<string> } {
   const mcp = new Set<string>(body.match(/mcp__[A-Za-z0-9_-]+?(?:__[A-Za-z0-9_.*-]+)?(?=[^A-Za-z0-9_.*-]|$)/g) ?? []);
   const builtin = new Set<string>();
+  const builtinAt = new Map<string, number>();
   const evidence = new Set<string>();
   for (const t of builtins) {
     const esc = t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    if (new RegExp(`\`${esc}(?:\\([^)]*\\))?\`|\\b${esc}\\(|\\b${esc} tool\\b|\\btool ${esc}\\b`).test(body)) builtin.add(t);
+    for (const m of body.matchAll(new RegExp(`\`${esc}(?:\\([^)]*\\))?\`|\\b${esc}\\(|\\b${esc} tool\\b|\\btool ${esc}\\b`, 'g'))) {
+      if (NEGATED_BEFORE.test(body.slice(body.lastIndexOf('\n', m.index) + 1, m.index))) continue;
+      builtin.add(t); builtinAt.set(t, m.index); break;
+    }
     if (AMBIENT_TOOLS.has(t) || TOOL_EVIDENCE[t]?.test(body) || new RegExp(`\\b${esc}\\b`).test(body)) evidence.add(t);
   }
-  return { mcp, builtin, evidence };
+  return { mcp, builtin, builtinAt, evidence };
 }

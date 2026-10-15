@@ -161,7 +161,7 @@ export function lintArtifact(a: Artifact, o: LintOptions): Diagnostic[] {
     }
     for (const b of mentions.builtin) {
       if (!list.some((t) => t.base === b) && !(a.kind === 'skill' && a.disallowedTools?.some((t) => t.base === b)))
-        out.push(d(a, 'body-tool-not-allowed', 'medium', `body uses \`${b}\` as a tool, which is not in \`${listKey}\``, { precedent: 'C1', line: bodyLine(a, new RegExp(`\\b${b}\\b`)) }));
+        out.push(d(a, 'body-tool-not-allowed', 'medium', `body uses \`${b}\` as a tool, which is not in \`${listKey}\``, { precedent: 'C1', line: lineAt(a, mentions.builtinAt.get(b)!) }));
     }
     // unscoped Bash on a read-only role where the harness supports scoping
     if (claimsReadOnly && list.some((t) => (t.base === 'Bash' || t.base === 'PowerShell') && !t.spec) && primary?.toolScopedSyntax)

@@ -117,3 +117,12 @@ test('injection-heuristic: a credential read is a command with the file as its a
   assert.equal(h.line, 6, 'points at the body line');
   assert.match(h.message, /"Run `cat \.env` first\."/, 'quotes the line');
 });
+
+test('C1: a negated tool mention ("No `AskUserQuestion`") is a ban, not a use', async () => {
+  const { bodyToolMentions } = await import('../lib/skill.mts');
+  const ban = bodyToolMentions('## Constraints\n- No `AskUserQuestion` — return findings as text.\n- Never call the `Agent` tool.\n', ['AskUserQuestion', 'Agent']);
+  assert.equal(ban.builtin.size, 0);
+  const use = bodyToolMentions('Do not guess.\nAsk via `AskUserQuestion` when unsure; never call `Agent`.\n', ['AskUserQuestion', 'Agent']);
+  assert.deepEqual([...use.builtin], ['AskUserQuestion'], 'a ban earlier on the line does not hide a real use');
+  assert.equal(use.builtinAt.get('AskUserQuestion'), 'Do not guess.\nAsk via '.length, 'the line points at the real use');
+});

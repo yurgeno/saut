@@ -3,6 +3,22 @@
 All notable changes to SAUT. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions are [semantic](https://semver.org/) and each release is tagged.
 
+## [0.7.4] — 2026-10-15
+
+### Fixed
+
+- **A banned tool no longer reads as a used one.** `body-tool-not-allowed` skipped no context: a
+  constraint like "No `AskUserQuestion` — return findings as text" was reported as the body using
+  `AskUserQuestion`. A backticked builtin right after a prohibition on its line (`no`, `not`,
+  `never`, `without`, `avoid`, `do not use the …`) is now a ban, not a use; the finding's line
+  points at the first real use.
+- **Studio labels lines in the editor's numbering.** Findings carry file lines, but the form
+  editor numbers the body from 1, so a finding at "line 52" pointed past a 47-line body. In form
+  mode a body finding now reads "body line 41" (the file line stays in the tooltip); the source
+  editor keeps file lines.
+
+[0.7.4]: https://github.com/yurgeno/saut/releases/tag/v0.7.4
+
 ## [0.7.3] — 2026-10-10
 
 ### Changed
