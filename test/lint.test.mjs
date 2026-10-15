@@ -126,3 +126,11 @@ test('C1: a negated tool mention ("No `AskUserQuestion`") is a ban, not a use', 
   assert.deepEqual([...use.builtin], ['AskUserQuestion'], 'a ban earlier on the line does not hide a real use');
   assert.equal(use.builtinAt.get('AskUserQuestion'), 'Do not guess.\nAsk via '.length, 'the line points at the real use');
 });
+
+test('S4: running build/test commands or gates is Bash evidence; reading about them is not', async () => {
+  const { TOOL_EVIDENCE } = await import('../lib/skill.mts');
+  for (const body of ["Re-run each affected repo's build/test commands against the working tree.", '- **Read-only + run gates only.**', 'It runs the lint script before reporting.'])
+    assert.ok(TOOL_EVIDENCE.Bash.test(body), body);
+  for (const body of ['Read the build commands in the README and summarize them.', 'Check that the plan lists test commands for each repo.'])
+    assert.ok(!TOOL_EVIDENCE.Bash.test(body), body);
+});

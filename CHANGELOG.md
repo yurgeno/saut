@@ -3,6 +3,18 @@
 All notable changes to SAUT. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions are [semantic](https://semver.org/) and each release is tagged.
 
+## [0.7.5] — 2026-10-15
+
+### Fixed
+
+- **Running build/test commands or gates is evidence of `Bash`.** `dead-privilege` reported a
+  granted `Bash` as unused when the body ran shell work only in prose — "re-run each affected
+  repo's build/test commands", "run gates only". A run verb followed on the same sentence by
+  build/test/lint/typecheck commands, scripts or suites, or by gates, now counts; reading or
+  listing such commands still does not.
+
+[0.7.5]: https://github.com/yurgeno/saut/releases/tag/v0.7.5
+
 ## [0.7.4] — 2026-10-15
 
 ### Fixed

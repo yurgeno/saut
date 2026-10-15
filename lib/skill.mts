@@ -167,10 +167,10 @@ export async function discover(targets: string[]): Promise<Artifact[]> {
 }
 
 // Prose EVIDENCE that a builtin tool is actually used by a body (for the dead-privilege
-// rule): a shell fence or a command line is evidence of Bash, "spawn the subagent" of
+// rule): a shell fence, a command line, or running build/test commands or gates is evidence of Bash, "spawn the subagent" of
 // Agent, and so on. Read/Glob/Grep/Skill/AskUserQuestion/ToolSearch are ambient — never dead.
 export const TOOL_EVIDENCE: Record<string, RegExp> = {
-  Bash: /```(?:bash|sh|shell|zsh)|\B`(?:git|npm|npx|node|pnpm|yarn|docker|make|cargo|go|python3?|pip|mvn|gradle|glab|gh|curl|ls|cat|grep|find|rg|kill|pkill|lsof|cd|tools\/|\.\/|\$)[^`\n]*`|\b(?:shell|command[- ]line|run (?:the )?(?:command|script)|terminal)\b/i,
+  Bash: /```(?:bash|sh|shell|zsh)|\B`(?:git|npm|npx|node|pnpm|yarn|docker|make|cargo|go|python3?|pip|mvn|gradle|glab|gh|curl|ls|cat|grep|find|rg|kill|pkill|lsof|cd|tools\/|\.\/|\$)[^`\n]*`|\b(?:shell|command[- ]line|run (?:the )?(?:command|script)|terminal)\b|\b(?:re-?)?run(?:s|ning)?\b[^.\n]{0,60}\b(?:(?:build|test|lint|typecheck)\w*(?:\/\w+)*\s+(?:commands?|scripts?|suites?)|gates?)\b/i,
   PowerShell: /powershell|pwsh/i,
   Write: /\b(?:writes?|written|creates?|records?|saves?|scaffolds?|generates?|new)\b[^.\n]{0,80}\b(?:files?|\.md|\.json|report|draft|memory|stubs?|artifacts?|descriptors?|module|component|test)\b/i,
   Edit: /\b(?:edits?|modif(?:y|ies)|patch(?:es)?|updates?|appl(?:y|ies)|fix(?:es)?|refactor|rewrite|amend|implement(?:s|ation)?|changes?)\b[^.\n]{0,80}\b(?:file|code|repo|line|section|\.md|source|descriptor|artifact|change)\b|\bimplement(?:s|ation)?\b/i,
