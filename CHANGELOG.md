@@ -3,6 +3,34 @@
 All notable changes to SAUT. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions are [semantic](https://semver.org/) and each release is tagged.
 
+## [0.7.6] — 2026-10-15
+
+### Fixed
+
+False positives found by linting two real packs (about a third of their findings were wrong):
+
+- **A negated use verb bans the tool it governs.** `body-tool-not-allowed` read "you do
+  **not** need to invoke the skill through `Skill`" as a use: only a negation right before the name
+  counted. A negated use verb (use, call, invoke, run, ask, spawn, delegate…) whose object is the
+  tool, in the same clause, now counts too. A negation that governs something else ("when no doc
+  exists use `Skill`", "don't guess and ask via `AskUserQuestion`") is still a use.
+- **A read-only claim is about the artifact.** "Tracker access is strictly read-only", "reads the
+  tracker issue (read-only)", "the read-only state of every member repo" and a hard-wrapped line
+  that merely starts with "read-only" no longer make an artifact read-only, so
+  `readonly-claim-vs-writes`, `readonly-not-enforced` and `bash-unscoped-readonly` stop firing on
+  them. A closing "(read-only)." still is a claim, and a bold list item ("- **Read-only + run
+  gates only.**") is now recognised as one.
+- **More ways to say "content is data".** `untrusted-content-rule` accepts "… never
+  instructions", "never an instruction to you" and "they never instruct you".
+- **More evidence for `dead-privilege`.** The description counts ("writes …/_raw.md" is a
+  `Write`; "never edits code" is no `Edit`); running verification, a suite or a check next to a
+  test or build is `Bash`; "web pages" and "fetched" are `WebFetch`; for MCP tools a templated
+  `mcp__<serverKey>__…`, a pointer at the allowlist ("the tracker tools listed in the
+  frontmatter") or a catalog role word followed by MCP/server/tools ("the tracker MCP") counts. A
+  bare role word ("the tracker") does not.
+
+[0.7.6]: https://github.com/yurgeno/saut/releases/tag/v0.7.6
+
 ## [0.7.5] — 2026-10-15
 
 ### Fixed

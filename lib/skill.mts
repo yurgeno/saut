@@ -170,13 +170,13 @@ export async function discover(targets: string[]): Promise<Artifact[]> {
 // rule): a shell fence, a command line, or running build/test commands or gates is evidence of Bash, "spawn the subagent" of
 // Agent, and so on. Read/Glob/Grep/Skill/AskUserQuestion/ToolSearch are ambient — never dead.
 export const TOOL_EVIDENCE: Record<string, RegExp> = {
-  Bash: /```(?:bash|sh|shell|zsh)|\B`(?:git|npm|npx|node|pnpm|yarn|docker|make|cargo|go|python3?|pip|mvn|gradle|glab|gh|curl|ls|cat|grep|find|rg|kill|pkill|lsof|cd|tools\/|\.\/|\$)[^`\n]*`|\b(?:shell|command[- ]line|run (?:the )?(?:command|script)|terminal)\b|\b(?:re-?)?run(?:s|ning)?\b[^.\n]{0,60}\b(?:(?:build|test|lint|typecheck)\w*(?:\/\w+)*\s+(?:commands?|scripts?|suites?)|gates?)\b/i,
+  Bash: /```(?:bash|sh|shell|zsh)|\B`(?:git|npm|npx|node|pnpm|yarn|docker|make|cargo|go|python3?|pip|mvn|gradle|glab|gh|curl|ls|cat|grep|find|rg|kill|pkill|lsof|cd|tools\/|\.\/|\$)[^`\n]*`|\b(?:shell|command[- ]line|run (?:the )?(?:command|script)|terminal)\b|\b(?:re-?)?run(?:s|ning)?\b[^.\n]{0,60}\b(?:(?:build|test|lint|typecheck)\w*(?:\/\w+)*\s+(?:commands?|scripts?|suites?)|gates?|verification|suites?|checks?\b(?=[^.\n]{0,40}\b(?:tests?|builds?|lint|typecheck|suites?)\b))\b/i,
   PowerShell: /powershell|pwsh/i,
   Write: /\b(?:writes?|written|creates?|records?|saves?|scaffolds?|generates?|new)\b[^.\n]{0,80}\b(?:files?|\.md|\.json|report|draft|memory|stubs?|artifacts?|descriptors?|module|component|test)\b/i,
   Edit: /\b(?:edits?|modif(?:y|ies)|patch(?:es)?|updates?|appl(?:y|ies)|fix(?:es)?|refactor|rewrite|amend|implement(?:s|ation)?|changes?)\b[^.\n]{0,80}\b(?:file|code|repo|line|section|\.md|source|descriptor|artifact|change)\b|\bimplement(?:s|ation)?\b/i,
   NotebookEdit: /notebook|\.ipynb/i,
   Agent: /\b(?:sub-?agents?|spawn|delegat|launch(?:es|ed)?|dispatch|isolated context|separate context|parallel (?:agents|workers)|fan[- ]out)\b/i,
-  WebFetch: /\b(?:fetch(?:es)?|web ?page|https?:\/\/|url)\b/i,
+  WebFetch: /\b(?:fetch(?:es|ed|ing)?|web ?pages?|https?:\/\/|urls?)\b/i,
   WebSearch: /\b(?:web ?search|search the web|search online)\b/i,
   AskUserQuestion: /\b(?:ask(?:s|ed)? (?:the )?(?:user|owner)|question|confirm(?:ation)? (?:from|with) the owner|owner (?:decides|picks|chooses)|wait for the owner)\b/i,
   Skill: /\bskill/i,
@@ -186,11 +186,30 @@ export const TOOL_EVIDENCE: Record<string, RegExp> = {
   SendMessage: /\bmessage/i,
   LSP: /\bLSP\b|language server/i,
 };
+// Prose evidence outside a negated sentence part ("never edits code" evidences nothing).
+export function evidenceIn(text: string, tool: string): boolean {
+  const re = TOOL_EVIDENCE[tool];
+  if (!re) return false;
+  for (const m of text.matchAll(new RegExp(re.source, re.flags + 'g'))) {
+    const start = Math.max(text.lastIndexOf('.', m.index), text.lastIndexOf(';', m.index), text.lastIndexOf('—', m.index)) + 1;
+    if (!/\b(?:no|not|never|without|cannot|\w+n't)\b/i.test(text.slice(start, m.index + m[0].length))) return true;
+  }
+  return false;
+}
 export const AMBIENT_TOOLS = new Set(['Read', 'Glob', 'Grep', 'Skill', 'AskUserQuestion', 'ToolSearch', 'TaskOutput', 'TaskStop', 'TodoWrite', 'ExitPlanMode', 'EnterPlanMode']);
 
-// A tool named right after a prohibition on its own line ("No `AskUserQuestion`", "never call
-// the `Agent` tool") is a ban, not a use — it must not count as the body using the tool.
-const NEGATED_BEFORE = /\b(?:no|not|never|without|avoid|forbidden|don't|do not|must not|mustn't)(?:\s+(?:use|call|invoke|run|using|calling|invoking))?(?:\s+the)?\s*$/i;
+// A tool named under a prohibition is a ban, not a use — it must not count as the body using
+// the tool: right after the negation ("No `AskUserQuestion`", "without the `Agent` tool"), or as
+// the object of a negated use verb within the same clause ("never call the `Agent` tool", "you
+// do **not** need to invoke the skill through `Skill`"). A negation that governs something else
+// ("when no doc exists, use `Skill`", "don't guess and ask via `AskUserQuestion`") is no ban.
+const NEG = String.raw`\b(?:no|not|never|without|cannot|\w+n't)\b(?:\*\*)?`;
+const BANNED_RIGHT_BEFORE = new RegExp(String.raw`${NEG}\s*(?:the\s+)?$`, 'i');
+const BANNED_BY_VERB = new RegExp(String.raw`${NEG}\s+(?:(?:need|have|ought)\s+to\s+|ever\s+)?(?:use|call|invoke|run|ask|spawn|launch|delegate|touch|rely on|go through)\b[^.;:!?—–]{0,40}$`, 'i');
+function negatedAt(text: string, index: number): boolean {
+  const before = text.slice(Math.max(0, index - 120), index);
+  return BANNED_RIGHT_BEFORE.test(before) || BANNED_BY_VERB.test(before);
+}
 
 // Tool mentions in a body: fully-qualified MCP names always; builtin names only when the
 // text treats them as an identifier (backticks, `Tool(`, or "the Tool tool") — plain prose
@@ -204,7 +223,7 @@ export function bodyToolMentions(body: string, builtins: Iterable<string>): { mc
   for (const t of builtins) {
     const esc = t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     for (const m of body.matchAll(new RegExp(`\`${esc}(?:\\([^)]*\\))?\`|\\b${esc}\\(|\\b${esc} tool\\b|\\btool ${esc}\\b`, 'g'))) {
-      if (NEGATED_BEFORE.test(body.slice(body.lastIndexOf('\n', m.index) + 1, m.index))) continue;
+      if (negatedAt(body, m.index)) continue;
       builtin.add(t); builtinAt.set(t, m.index); break;
     }
     if (AMBIENT_TOOLS.has(t) || TOOL_EVIDENCE[t]?.test(body) || new RegExp(`\\b${esc}\\b`).test(body)) evidence.add(t);

@@ -5,7 +5,7 @@
 // No score. A finding is a finding; the per-harness `enforcement` column says whether the
 // declared allowlist is a restriction, a grant, prose, or dropped on that harness.
 import type { AgentArtifact, Artifact, Autofix, Diagnostic, HarnessCaps, ToolRef, ToolRegistry } from './types.mts';
-import { bodyToolMentions } from './skill.mts';
+import { bodyToolMentions, evidenceIn } from './skill.mts';
 import path from 'node:path';
 import { classifyTool } from './tools.mts';
 import { docFor, ruleInfo } from './rules.mts';
@@ -23,11 +23,15 @@ const WRITE_TOOLS = new Set(['Write', 'Edit', 'NotebookEdit', 'MultiEdit', 'writ
 const SHELL_TOOLS = new Set(['Bash', 'PowerShell', 'bash', 'shell']);
 const WRITE_MCP = /(write|create|update|delete|draft|push|commit|send|post|set_|put_)/i;
 // A read-only CLAIM about the artifact itself — not "the tracker is read-only" in passing:
-// the description says so, or a body line opens with it, or "this skill/agent never writes".
-const READONLY_CLAIM_DESC = /(?<!\b(?:repos?|repositories|tracker|jira|git|scm|branch(?:es)?|store|member repos?)\s(?:(?:stay|stays|remain|remains|are|is)\s)?)\b(?:read[- ]only(?! (?:tool|token|PAT|mode|access|call|api|on code|analysis of))|never writes?|does not write|observation[- ]only|non-mutating)\b/i;
-const READONLY_CLAIM_BODY = /^\s*(?:>|\*\*|[-*] )?\s*read[- ]only\b|\bthis (?:skill|agent) (?:is read[- ]only|never writes|does not write|must not write)|\bNEVER writes\b/im;
+// the description says so, or a body paragraph, heading-led line, quote or list item opens with
+// it, or "this skill/agent never writes". Scoped uses are not claims: "tracker access is
+// strictly read-only", a mid-sentence "(read-only)" after the object it qualifies (a closing
+// "(read-only)." is a claim), "the read-only state of …", and a hard-wrapped line that merely
+// starts with the word.
+const READONLY_CLAIM_DESC = /(?<!\b(?:repos?|repositories|tracker|jira|git|scm|branch(?:es)?|store|member repos?|access)\s(?:(?:stay|stays|remain|remains|are|is)\s)?(?:(?:strictly|always|fully|absolutely)\s)?)(?<!\bthe\s)(?:(?<!\()|(?=read[- ]only\)\s*(?:[.;]|$)))\b(?:read[- ]only(?! (?:tool|token|PAT|mode|access|call|api|on code|analysis of))|never writes?|does not write|observation[- ]only|non-mutating)\b/i;
+const READONLY_CLAIM_BODY = /(?:^|\n[ \t]*\n|(?:^|\n)#[^\n]*\n)[ \t]*read[- ]only\b|(?:^|\n)[ \t]*(?:>[ \t]*|\*\*|(?:>[ \t]*)?(?:[-*]|\d+\.)[ \t]+(?:\*\*)?)read[- ]only\b|\bthis (?:skill|agent) (?:is read[- ]only|never writes|does not write|must not write)|\bNEVER writes\b/i;
 const EXTERNAL_INPUT = /\b(jira|ticket|tracker|attachment|webfetch|websearch|web page|url|http[s]?:\/\/|context7|mcp__atlassian|mcp__context7|scrap|fetch)\b/i;
-const UNTRUSTED_RULE = /\b(untrusted|treat(?:ed)? as data|is data,? not|not (?:as )?instructions?|prompt[- ]injection|never follow instructions)\b/i;
+const UNTRUSTED_RULE = /\b(untrusted|treat(?:ed)? as data|is data,? not|not (?:as )?instructions?|never (?:an? )?instructions?|never instructs? you|prompt[- ]injection|never follow instructions)\b/i;
 // Each probe returns the index of its first match in the body, or -1.
 const byRe = (re: RegExp) => (s: string): number => re.exec(s)?.index ?? -1;
 // curl|wget … | sh on one line. Linear: find each pipe into an interpreter, then look for the
@@ -135,16 +139,23 @@ export function lintArtifact(a: Artifact, o: LintOptions): Diagnostic[] {
         else if (v === 'mcp-unknown-tool') out.push(d(a, 'unknown-mcp-tool', 'high', `"${t.raw}" is not among the tools the catalog lists for server "${t.mcp!.server}"`, { line: listLine, precedent: 'C1' }));
       }
     }
-    // dead privileges: granted, never referenced
+    // dead privileges: granted, never referenced. The description counts as evidence too
+    // ("writes memory/…/_raw.md" is a Write); so does a templated `mcp__<serverKey>__…` or a
+    // pointer at the allowlist itself ("the tracker tools listed in the frontmatter") — the body
+    // calls every granted server — and a catalog role word ("the tracker MCP", "a docs server").
+    const prose = `${a.body}\n${a.description ?? ''}`;
+    const templatedMcp = /\bmcp__<[^>\n]+>|\btools (?:listed |granted )?in (?:the |your |this )?(?:frontmatter|allowlist)\b/i.test(a.body);
     for (const t of list) {
       if (t.spec) continue;                                   // scoped rules are deliberate
       // MCP: the exact name, the server (`atlassian`), or the tool's first word (`jira`) in prose count as evidence
       const serverWord = t.mcp ? new RegExp(`\\b${t.mcp.server.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i') : null;
       const toolWord = t.mcp?.tool ? new RegExp(`\\b${t.mcp.tool.split(/[_-]/)[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i') : null;
+      const role = t.mcp ? o.registry.servers.find((sv) => sv.serverKey === t.mcp!.server)?.role : undefined;
+      const roleWord = role ? new RegExp(`\\b${role.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+(?:MCP|servers?|tools?)\\b`, 'i') : null;
       const referenced = t.mcp
         ? [...mentions.mcp].some((m) => m === t.base || (t.mcp!.tool === null && m.startsWith(`mcp__${t.mcp!.server}__`)) || (t.mcp!.tool?.includes('*') && m.startsWith(t.base.replace('*', ''))))
-          || (serverWord?.test(a.body) ?? false) || (toolWord && toolWord.source.length > 6 && toolWord.test(a.body))
-        : mentions.builtin.has(t.base) || mentions.evidence.has(t.base);
+          || templatedMcp || (serverWord?.test(prose) ?? false) || (toolWord && toolWord.source.length > 6 && toolWord.test(prose)) || (roleWord?.test(prose) ?? false)
+        : mentions.builtin.has(t.base) || mentions.evidence.has(t.base) || evidenceIn(a.description ?? '', t.base);
       if (!referenced) out.push(d(a, 'dead-privilege', 'medium', `"${t.raw}" is granted but the body never mentions it — remove it, or say where it is used`,
         { line: listLine, precedent: 'S4', autofix: list.length > 1 ? { op: 'list-remove', key: listKey, item: t.raw, label: `Remove ${t.raw} from ${listKey}`, safety: 'review' } : undefined }));
     }

@@ -16,12 +16,12 @@ harness, what the declared allowlist actually is there — `restrict`, `grant`, 
 | `model-invocable-writer` | high | `disable-model-invocation` is not `true` and the skill has no allowlist, can mutate (Write/Edit/bare Bash/writing MCP tools), or drives an expensive runtime | S2, S10 |
 | `supervised-but-auto` | high | the body demands supervision ("SUPERVISED, always", "never unattended") but the model may invoke the skill | S2 |
 | `unreachable` | high | `user-invocable: false` and `disable-model-invocation: true` | — |
-| `dead-privilege` | medium | a granted tool the body never evidences (an MCP name, the server or the tool's first word; a builtin via prose evidence — shell commands, or running build/test commands or gates, for Bash, "spawn the subagent" for Agent…). Read/Glob/Grep/Skill/AskUserQuestion are ambient and never dead; scoped rules (`Bash(git diff *)`) are deliberate and skipped | S4 |
-| `body-tool-not-allowed` | high (MCP) / medium (builtin) | the body cites a tool (`mcp__…`, or a backticked builtin not right after a prohibition such as "No `AskUserQuestion`") the allowlist does not carry — the harness will lack it or prompt: silent degradation | C1 |
+| `dead-privilege` | medium | a granted tool the body or description never evidences (an MCP name, the server or the tool's first word, a catalog role word such as "the tracker MCP", a templated `mcp__<serverKey>__…` or "the tools listed in the frontmatter"; a builtin via prose evidence — shell commands, or running build/test commands, verification, a suite, a test/build check or gates, for Bash, "spawn the subagent" for Agent…). Read/Glob/Grep/Skill/AskUserQuestion are ambient and never dead; scoped rules (`Bash(git diff *)`) are deliberate and skipped | S4 |
+| `body-tool-not-allowed` | high (MCP) / medium (builtin) | the body cites a tool (`mcp__…`, or a backticked builtin that is not banned — "No `AskUserQuestion`", "you do not need to invoke it through `Skill`") the allowlist does not carry — the harness will lack it or prompt: silent degradation | C1 |
 | `unknown-tool` | high | an allowlist name that is neither a builtin of the harness nor `mcp__…` — a dead name grants nothing | — |
 | `legacy-tool` | info | a builtin name from older harness versions (`MultiEdit`, `LS`, …) | — |
 | `unknown-mcp-server` / `unknown-mcp-tool` | high | `mcp__server__tool` where the catalog lists no such server / no such tool for it (only when a catalog is present) | C1 |
-| `readonly-claim-vs-writes` | medium | the description or body claims read-only, but Write/Edit/writing MCP tools are granted (or nothing is restricted) | C3 |
+| `readonly-claim-vs-writes` | medium | the description or body claims read-only, but Write/Edit/writing MCP tools are granted (or nothing is restricted). A claim is about the artifact: a description phrase, a body paragraph or list item that opens with "Read-only", or "this skill/agent never writes" — not a scoped "tracker access is read-only", a mid-sentence parenthetical "(read-only), …", "the read-only state of …" or a hard-wrapped line that starts with the word | C3 |
 | `bash-unscoped-readonly` | medium | claims read-only but grants bare `Bash`/`PowerShell` where the harness supports `Tool(spec)` scoping | S7 |
 | `readonly-not-enforced` | high / medium | claims read-only; on a *grant* harness (Claude Code) no `disallowed-tools` backs it — `allowed-tools` only pre-approves; on *prose*/*dropped* harnesses the promise is informational | Claude Code docs, S7 |
 | `agent-writes-via-bash` | medium | an agent described as writing a file has `Bash` but no `Write`/`Edit` — Bash is a superset of Write | S3 |
@@ -31,7 +31,7 @@ harness, what the declared allowlist actually is there — `restrict`, `grant`, 
 | rule | severity | fires when | precedent |
 |---|---|---|---|
 | `dynamic-context` | high (bare Bash) / medium | the body contains `` !`cmd` `` dynamic context — executed before the model sees anything | Reversec "Skill Issues", Datadog 2026 |
-| `untrusted-content-rule` | medium | the artifact pulls external content (tracker, web, attachments, docs MCP) and never states that such content is data, not instructions | S5 |
+| `untrusted-content-rule` | medium | the artifact pulls external content (tracker, web, attachments, docs MCP) and never states that such content is data, not instructions ("treat as data", "is data, not …", "never instructions", "they never instruct you", "untrusted" all count) | S5 |
 | `injection-heuristic` | medium | "ignore previous instructions", invisible/bidi Unicode, download-and-execute pipelines, credential-file reads | Snyk ToxicSkills |
 | `secret-pattern` | high | a secret-shaped value (API keys, PATs, private keys, `password = "…"`) | pack `scan-secrets` |
 
