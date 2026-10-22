@@ -243,7 +243,7 @@ export const RULES: Record<string, RuleInfo> = {
   'taut-wiring-unknown-key': {
     category: 'taut', title: 'Unknown metadata.taut key',
     why: 'The engine never reads it; it documents nothing and may hide a typo.',
-    fix: 'Rename it to agents, requires, mcp, repos or role — or remove it.',
+    fix: 'Rename it to agents, requires, mcp, repos, role or maturity — or remove it.',
   },
   'taut-compile': {
     category: 'taut', title: 'The pack will not compile',

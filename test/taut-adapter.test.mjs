@@ -43,6 +43,7 @@ metadata:
     requires: [magic]
     repos: [ghost-repo]
     role: ghost
+    maturity: draft
     extra: 1
 ---
 # fx-broken
@@ -52,6 +53,10 @@ Read only.
     const { diagnostics } = await runLint([path.join(tmp, 'skills', 'fx-broken')], { _: [], taut: engine, deployment: 'fxdep' });
     const codes = diagnostics.map((d) => d.code);
     for (const c of ['taut-agent-missing', 'taut-mcp-role-unknown', 'taut-requires-unknown', 'taut-repo-unknown', 'taut-role-unknown', 'taut-wiring-unknown-key']) assert.ok(codes.includes(c), c);
+    // `maturity` is a wiring key the engine reads (TAUT v0.8.0: draft artifacts) — only `extra` is unknown.
+    const unknown = diagnostics.filter((d) => d.code === 'taut-wiring-unknown-key').map((d) => d.message);
+    assert.equal(unknown.length, 1, unknown.join('\n'));
+    assert.match(unknown[0], /metadata\.taut\.extra /);
   } finally { await fs.rm(tmp, { recursive: true, force: true }); }
 });
 

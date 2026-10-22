@@ -241,7 +241,7 @@ export function lintWiring(a: Artifact, ctx: TautContext): Diagnostic[] {
   const out: Diagnostic[] = [];
   const line = a.fm.lines.metadata;
   const d = (code: string, severity: Diagnostic['severity'], message: string, precedent?: string) => out.push({ code, severity, message, path: a.path, line, precedent });
-  for (const k of Object.keys(w)) if (!['agents', 'requires', 'mcp', 'repos', 'role'].includes(k)) d('taut-wiring-unknown-key', 'medium', `metadata.taut.${k} is not a wiring key the engine reads (agents, requires, mcp, repos, role)`);
+  for (const k of Object.keys(w)) if (!['agents', 'requires', 'mcp', 'repos', 'role', 'maturity'].includes(k)) d('taut-wiring-unknown-key', 'medium', `metadata.taut.${k} is not a wiring key the engine reads (agents, requires, mcp, repos, role, maturity)`);
   for (const ag of Array.isArray(w.agents) ? w.agents.map(String) : []) if (!ctx.catalog.agents.has(ag)) d('taut-agent-missing', 'high', `metadata.taut.agents names "${ag}" — not in the pack catalog (the engine fails setup: named-but-missing agent)`);
   const roles = new Set(Object.values(ctx.mcp).map((s) => s.role).filter(Boolean));
   for (const r of Array.isArray(w.mcp) ? w.mcp.map(String) : []) if (!roles.has(r)) d('taut-mcp-role-unknown', 'medium', `metadata.taut.mcp names role "${r}" — no server in the catalog carries it (roles: ${[...roles].join(', ') || 'none'})`, 'C2');
