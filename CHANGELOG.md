@@ -5,6 +5,8 @@ versions are [semantic](https://semver.org/) and each release is tagged.
 
 ## [Unreleased]
 
+## [0.8.1] — 2026-11-15
+
 ### Changed
 
 - **SAUT now stands for Surface Assurance Under Trust** (was Skill Assurance). Since 0.8.0 SAUT
@@ -12,6 +14,8 @@ versions are [semantic](https://semver.org/) and each release is tagged.
   hooks and their scripts, settings and permissions, instruction files and plugins. The name, the
   CLI, `saut.json` and every option stay the same. README, CLI help, `CITATION.cff`, package
   keywords and the rules reference describe the agent surface instead of skills alone.
+
+[0.8.1]: https://github.com/yurgeno/saut/releases/tag/v0.8.1
 
 ## [0.8.0] — 2026-11-15
 
