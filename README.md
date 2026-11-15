@@ -1,4 +1,4 @@
-# SAUT — Surface Assurance Under Trust
+# SAUT: Surface Assurance Under Trust
 
 [![test](https://github.com/yurgeno/saut/actions/workflows/test.yml/badge.svg)](https://github.com/yurgeno/saut/actions/workflows/test.yml)
 [![release](https://img.shields.io/github/v/release/yurgeno/saut)](https://github.com/yurgeno/saut/releases)
@@ -7,25 +7,25 @@
 ![platforms](https://img.shields.io/badge/platforms-linux%20%7C%20macos-informational)
 ![runtime deps](https://img.shields.io/badge/runtime%20deps-0-success)
 
-**Lint, cost and test the agent surface of a repository — skills, subagents, MCP servers, hooks,
-permissions and instruction files — for any harness, from one source.**
+**Lint, cost and test the agent surface of a repository (skills, subagents, MCP servers, hooks,
+permissions and instruction files) for any harness, from one source.**
 
 A repository's **agent surface** is everything an AI coding agent loads or runs from it:
 [agent skills](https://agentskills.io) and subagents, MCP servers, hooks and the scripts they
 call, settings and permissions, always-on instruction files (`CLAUDE.md`, `AGENTS.md`, …),
 commands and plugins. Claude Code, Codex, Copilot, Cursor, OpenCode and the rest each read that
-surface differently. `allowed-tools` is a *grant* on Claude Code — it pre-approves, it does not
-restrict — informational prose on Codex and OpenCode, and dropped outright when a subagent is
-rendered to TOML. Nothing tells the author. Nothing counts what a skill costs in every session.
-Nothing checks that the tools its body uses are the tools it declared, or what a hook runs.
+surface differently. On Claude Code `allowed-tools` is a *grant*: it pre-approves tools but does
+not restrict them. On Codex and OpenCode it is informational prose, and it is dropped when a
+subagent is rendered to TOML. The harnesses do not warn the author about this, do not report what
+a skill costs in every session, and do not check that the tools a skill uses are the ones it
+declared or what a hook runs.
 
-SAUT does: it answers *what can an agent do in this repository, on each harness, and what does
-it cost*. It works on any repository, folder or git URL; a [TAUT](https://github.com/yurgeno/taut)
+SAUT answers *what can an agent do in this repository, on each harness, and what does it cost*. It works on any repository, folder or git URL; a [TAUT](https://github.com/yurgeno/taut)
 data pack is a first-class case, not a requirement.
 
-SAUT is not a malware scanner. Content scanners ask whether something is hostile; SAUT asks how
-much an agent could reach if it were — least privilege and blast radius. Run both: `--scan` calls
-an installed content scanner in the same run.
+SAUT is not a malware scanner. A content scanner tries to tell whether something is hostile.
+SAUT reports how much an agent could reach if it were, which is a question of least privilege.
+Use both: `--scan` calls an installed content scanner in the same run.
 
 ```
 saut lint  <paths | git url…>   privilege / safety / workspace findings + per-harness enforcement
@@ -39,7 +39,7 @@ saut guidance                    how old the vendor guidance is; where this mach
 saut tools [dir] [--live]        the tool names an allowlist may cite
 ```
 
-Zero runtime dependencies, Node ≥ 24 (TypeScript executed natively — no build step).
+Zero runtime dependencies, Node ≥ 24 (TypeScript runs natively, so there is no build step).
 Apache-2.0. Part of the *Under Trust* family, next to
 [KAUT](https://github.com/yurgeno/kaut) (knowledge) and
 [TAUT](https://github.com/yurgeno/taut) (toolchain distribution).
@@ -53,7 +53,7 @@ used, a supervised-only skill the model could invoke on its own, and ~3 000 toke
 descriptions paid in every session. Every one of those is now a rule
 (see [docs/RULES.md](docs/RULES.md)), and every rule cites its precedent.
 
-The part no scanner gives you is the **matrix**: for one artifact, on each harness, is the
+The output scanners do not give you is the **matrix**: for one artifact, on each harness, is the
 declared allowlist a restriction, a pre-approval grant, informational prose, or dropped?
 
 ```
@@ -72,8 +72,8 @@ git clone https://github.com/yurgeno/saut.git ~/saut
 node ~/saut/saut.mjs --help          # or: npm link inside the clone → `saut`
 ```
 
-Node ≥ 24 is the floor; Linux and macOS are the supported platforms. No build step and no
-runtime dependencies — `npm install` fetches the typechecker and nothing else.
+Node 24 or later is required; Linux and macOS are the supported platforms. There is no build step
+and there are no runtime dependencies: `npm install` fetches the typechecker and nothing else.
 
 ## Usage
 
@@ -91,7 +91,7 @@ saut lint https://github.com/o/r          # a remote repository: one commit, fet
 saut lint https://github.com/o/r/tree/main/skills/review   # a browse URL: ref + path
 saut lint 'git@gitlab.example.com:g/r.git#v1.2:skills'     # <url>#<ref>:<path>
 
-saut report https://github.com/o/r       # one complete report (Markdown) — dir or URL
+saut report https://github.com/o/r       # one complete report (Markdown) for a dir or URL
 saut report https://github.com/o/r --out report.html       # self-contained HTML (or .json / --format)
 
 saut cost .                              # estimates (no key, no network)
@@ -111,10 +111,11 @@ tree to walk (`skills/`, `<project>/skills/`, `agents/`, `.claude/agents/`, … 
 the same walk).
 
 **The agent workspace.** Beyond skills and agents, `lint`, `report`, `passport` and the Studio
-read everything else a harness loads or runs from the project — hooks, MCP servers, settings and
+read everything else a harness loads or runs from the project: hooks, MCP servers, settings and
 permissions, always-on instruction files (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, Copilot, Cursor,
 Cline and Devin rules), commands, plugin manifests (also plugins in subfolders of a marketplace)
-and the code those hooks and plugins run, followed script to script and read, never executed.
+and the code those hooks and plugins run. SAUT follows that code from script to script and reads
+it without executing it.
 Where each harness looks is data in `lib/workspace.json`. `--no-workspace` skips it.
 
 **Severity follows evidence, and copies count once.** A skill without an allowlist that only reads
@@ -122,7 +123,7 @@ and reports is hygiene (low); one whose text asks to change files is medium; add
 and it is high. The same skill in several harness folders, or one instruction text saved for
 several harnesses, is reported once with its copies listed. See [docs/RULES.md](docs/RULES.md).
 
-**Remote targets.** `lint`, `cost`, `passport`, `report` and `studio` also take a git repository URL — `https://`,
+**Remote targets.** `lint`, `cost`, `passport`, `report` and `studio` also take a git repository URL: `https://`,
 `ssh://`, `git@host:owner/repo` or `file://`, optionally `#<ref>` (branch, tag or full commit
 id) and `:<path>` inside the repository; a GitHub/GitLab `…/tree/<ref>/<path>` or `…/blob/…`
 URL works as copied. SAUT fetches that one commit into a temporary directory, scans it, and
@@ -147,29 +148,29 @@ for `tools/list` (values of environment variables never leave your machine).
 
 | column | what it is | when it is paid |
 |---|---|---|
-| always-on | `name` + `description` — the listing entry | every session, whether or not the skill fires |
+| always-on | `name` + `description`, the listing entry | every session, whether or not the skill fires |
 | on-invoke | the body | each time the skill fires |
 | transitive | subagents the skill wires, files the body references by path | on invoke, in the subagent's or the reader's context |
-| used | invocations recorded by a compiled workspace's local telemetry (`--workspace`) | — |
+| used | invocations recorded by a compiled workspace's local telemetry (`--workspace`) | not applicable |
 
 Default numbers are **estimates** (a deterministic heuristic, labelled as such). `--exact`
 counts through the Claude token-counting API. Budgets (`descriptionChars`, `alwaysOnTokens`,
 `invokeTokens`) turn the passport into a gate.
 
-Cost and usage together are the point: a skill that spends its always-on tokens in every
+Cost and usage are most useful together: a skill that spends its always-on tokens in every
 session and never fires is the one to compress or drop.
 
 A zero in `used` is only evidence when the counting was honest, so SAUT states the limits of
-its own measurement. Self-test rows — a workspace's integrity probe invoking the gate out of
-band — are excluded and counted separately rather than credited to whichever skill they
+its own measurement. Self-test rows, where a workspace's integrity probe invokes the gate out of
+band, are excluded and counted separately rather than credited to whichever skill they
 probed. And telemetry written before the workspace's gate recorded each invocation path
-cannot see direct `/slash` invocations at all; since a skill declaring
-`disable-model-invocation: true` is reachable by no other path, SAUT says so out loud
-instead of printing a zero that reads as "nobody uses this".
+cannot see direct `/slash` invocations at all. A skill declaring
+`disable-model-invocation: true` can only be reached that way, so SAUT prints a note instead
+of a zero that would read as "nobody uses this".
 
 ## Harness registry
 
-Everything SAUT knows about a harness is data: `lib/harnesses/<id>.json` — discovery
+Everything SAUT knows about a harness is data in `lib/harnesses/<id>.json`: discovery
 directories, builtin tool names, honoured frontmatter fields, allowlist semantics for skills
 and for subagents, the deny mechanism, the listing budget, the headless runner, the recorded
 degradations, and the documentation URLs the entry was derived from. `saut harnesses` prints
@@ -182,7 +183,7 @@ for the harnesses it ships.
 ## The bench
 
 `saut test` answers what a lint cannot: does the artifact land where the harness looks (L1),
-does the harness actually fire it — and not fire on an unrelated prompt (L2), does the run
+does the harness fire it, and stay quiet on an unrelated prompt (L2), does the run
 stay inside the declared allowlist (L3), and did it do the job (L4, scenario graders).
 Everything happens in a scratch workspace; for a TAUT pack the engine compiles it there first,
 so the bench runs the real installed artifact with its gate live.
@@ -199,7 +200,7 @@ matrix skill dev-review · taut · L3
 ```
 
 Two states carry most of the value: **`lost to <skill>`** (the implicit prompt fired a
-*different* skill — the description lost a routing contest) and **outside allowlist** (a call
+*different* skill, so the description lost a routing contest) and **outside allowlist** (a call
 ran that the declaration never covered; on Codex and OpenCode that is the recorded
 degradation, measured rather than asserted). L4 graders use the Claude Code `plugin eval`
 layout (`regex`, `tool_used`, `tool_order`, `file_exists`, `llm`, `baseline`), and an
@@ -213,9 +214,9 @@ saut studio .
 ```
 
 One local page over the same functions. The **Overview** ranks every skill and agent by what is
-wrong with it; the **Skill** view edits one — a form and the raw file, a Markdown editor, the
-findings re-linted as you type, each with how to fix it and a previewable fix — and saves
-through a diff, changing only what you changed (comments, unknown keys and capability-marker
+wrong with it. The **Skill** view edits one artifact with a form and the raw file, a Markdown
+editor, and findings that are re-linted as you type, each with how to fix it and a previewable
+fix. It saves through a diff, changing only what you changed (comments, unknown keys and capability-marker
 branches survive); an **agent review** proposes changes against the findings and the current
 guidance, each checked and re-linted before you apply it to the editor. **Bench** runs L1–L4 with
 the events streaming live and measures an edit before and after; **Harnesses** is the registry as
@@ -223,23 +224,23 @@ reference. A compiled TAUT workspace opens read-only, naming the pack source.
 
 Loopback only, a one-time key in the printed address, a per-session token in a custom header,
 no inline scripts, Origin and Host checks, reads and writes limited to skill and agent files
-under the root, atomic saves — the same contour as the TAUT panel. Details:
+under the root, and atomic saves. This is the same security contour as the TAUT panel. Details:
 [docs/STUDIO.md](docs/STUDIO.md).
 
 ## TAUT packs
 
 A [TAUT](https://github.com/yurgeno/taut) data pack is detected by shape (`pack.json` +
-`skills/` or `<project>/deployment.json`). Without an engine it lints as plain skills —
+`skills/` or `<project>/deployment.json`). Without an engine it lints as plain skills:
 capability-marker branches (`# kaut:on` … `# kaut:off`) are read as the *union* of allowlists
 and the first description. With an engine reachable (`--taut <dir>`, `$SAUT_TAUT_ENGINE`,
 `~/taut`; engine v0.7.0 or later, which ships the `render` verb and the harness capability
 registry), the adapter switches on:
 
-- skill frontmatter is parsed by the **engine's** parser — the strict subset that decides a
-  compile — under the all-gates-ON view; what the engine refuses is a finding, not a crash;
+- skill frontmatter is parsed by the **engine's** parser (the strict subset that decides a
+  compile) under the all-gates-ON view; what the engine refuses is a finding, not a crash;
 - `metadata.taut` is checked against the pack's real catalog: `agents` must exist, `mcp` roles
   must be carried by a catalog server, `repos` must be in the deployment's repo map,
-  `requires` must be a gate the engine knows, `role` one it consumes — and no two skills may
+  `requires` must be a gate the engine knows, `role` one it consumes, and no two skills may
   claim the same role;
 - the matrix uses the engine's own adapter records (allowlist semantics, degradations);
 - `saut passport` adds `compiled`: for every harness the target path, byte size, token estimate
@@ -282,4 +283,4 @@ the behavioural suite over `test/fixtures/pack` (one artifact per rule). The who
 
 ## License
 
-Apache-2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

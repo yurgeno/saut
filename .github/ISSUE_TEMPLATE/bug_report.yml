@@ -30,7 +30,7 @@ body:
     attributes:
       label: The artifact
       description: >-
-        The smallest SKILL.md (or agent file) that shows it — frontmatter included.
+        The smallest SKILL.md (or agent file) that shows it, frontmatter included.
         Redact anything private; a reduced case is more useful than a real one.
       render: markdown
   - type: input
@@ -56,5 +56,5 @@ body:
     attributes:
       value: >-
         **Found a way past the Studio token guard, out of a bench scratch workspace, or an
-        input that reaches a shell?** That is a vulnerability — report it privately per
+        input that reaches a shell?** That is a vulnerability. Report it privately per
         [SECURITY.md](../blob/master/SECURITY.md) instead of filing an issue.

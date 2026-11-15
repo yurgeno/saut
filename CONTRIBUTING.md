@@ -14,13 +14,13 @@ npm test           # tsc --noEmit && node --test
 
 The Studio's editor is CodeMirror 6, bundled once into `lib/studio/vendor/codemirror.js` (the
 entry point is `tools/codemirror-entry.mjs`). After bumping any `@codemirror/*` or `codemirror`
-devDependency, rebuild it with `npm run build:vendor` and commit the result — users never
+devDependency, rebuild it with `npm run build:vendor` and commit the result. Users never
 install it, so SAUT keeps no runtime dependencies.
 
 Node ≥ 24 is required: the core is TypeScript executed natively via type stripping, `tsc`
 is only the checker. Linux and macOS are the supported platforms. The whole suite runs
-**offline** — the bench tests drive fake harness binaries on `PATH` and the judge tests a
-fake `claude` — so `npm test` costs nothing and needs no credentials.
+**offline**: the bench tests drive fake harness binaries on `PATH` and the judge tests a
+fake `claude`, so `npm test` costs nothing and needs no credentials.
 
 ## Ground rules
 
@@ -31,8 +31,8 @@ fake `claude` — so `npm test` costs nothing and needs no credentials.
   harness is adding a file (plus a runner in `lib/bench/runners.mts` if it can be driven
   headlessly). A rule that special-cases a harness by name in `lib/lint.mts` is a smell.
 - **Every rule cites its precedent.** A lint rule states what breaks and where the evidence
-  came from — a review finding, a harness doc, published research. A rule nobody can trace
-  is a rule nobody will trust.
+  came from: a review finding, a harness doc or published research. Users cannot judge a rule
+  whose source they cannot check.
 - **No score.** SAUT reports findings and the per-harness enforcement matrix. It does not
   reduce a skill to a number.
 - **Measure, don't assert.** Claims about harness behaviour belong in the registry with a
@@ -51,9 +51,9 @@ fake `claude` — so `npm test` costs nothing and needs no credentials.
 | Rules and their severities | `lib/lint.mts` + a fixture in `test/fixtures/pack/` + a row in [docs/RULES.md](docs/RULES.md) |
 | What a harness enforces or degrades | `lib/harnesses/<id>.json` (with the doc URL it came from) |
 | Bench levels, cases, graders, isolation | `lib/bench/` + [docs/BENCH.md](docs/BENCH.md) |
-| The TAUT adapter | `lib/adapters/taut.mts` — the engine is imported, never re-implemented |
+| The TAUT adapter | `lib/adapters/taut.mts`; the engine is imported, never re-implemented |
 | The local UI | `lib/studio/` + [docs/STUDIO.md](docs/STUDIO.md); its security contour is documented there |
-| Docs | `docs/` — update them in the same PR as the behavior they describe |
+| Docs | `docs/`; update them in the same PR as the behavior they describe |
 
 ## Adding a lint rule
 

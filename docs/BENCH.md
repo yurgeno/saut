@@ -1,13 +1,13 @@
-# The bench — `saut test`
+# The bench: `saut test`
 
-Three cumulative levels. L1 is free; L2 and L3 call real models and cost real money.
+Four cumulative levels. L1 is free; L2 to L4 call real models and cost real money.
 
 | level | question | cost |
 |---|---|---|
 | **L1 compile** | does the artifact land where each harness looks for it? | free |
-| **L2 trigger** | does the harness actually fire this skill — explicitly, implicitly, and *not* on an unrelated prompt? | one model run per case per harness |
+| **L2 trigger** | does the harness fire this skill when asked explicitly or implicitly, and stay quiet on an unrelated prompt? | one model run per case per harness |
 | **L3 obedience** | do the runs stay inside the declared allowlist, and what does the harness refuse? | the same runs |
-| **L4 scenario** | did the run actually do the job — graders over the transcript, the tool trace and the files it produced | the same runs, plus a cheap judge call per `llm` grader |
+| **L4 scenario** | did the run do the job? Graders read the transcript, the tool trace and the files it produced | the same runs, plus a cheap judge call per `llm` grader |
 
 ```bash
 saut test skills/dev-review                        # L3, 1 run per case, every runnable harness
@@ -17,7 +17,7 @@ saut test agents/dev-reviewer.md --case implicit   # one case
 saut test skills/verify --landscape ~/projects --keep
 ```
 
-## L1 — the scratch workspace
+## L1: the scratch workspace
 
 Nothing runs in your workspace. A temporary directory is built per bench:
 
@@ -26,15 +26,15 @@ Nothing runs in your workspace. A temporary directory is built per bench:
   each markdown agents directory, an `opencode.json` denies bash/edit/webfetch, and the
   whole thing becomes a git repo (Codex walks up to a git root).
 - **taut**: the pack is **compiled by the engine** into `<scratch>/ws` against stub member
-  repos — the same recipe as a pack's `tools/validate-pack.sh` — then `taut verify` seals it.
-  What the bench runs against is therefore the real installed artifact: markers resolved,
+  repos, using the same recipe as a pack's `tools/validate-pack.sh`, and then `taut verify` seals
+  it. The bench therefore runs against the real installed artifact: markers resolved,
   hooks wired, per-harness paths, the integrity gate live. `--landscape <dir>` replaces the
   stubs with a **copy** of a real landscape; the original is never touched.
 
-L1 fails loudly when the artifact does not land (excluded by the repo-map lint, gated off by
-a capability marker, or a compile error) — the later levels are then skipped for that run.
+L1 fails with a clear error when the artifact does not land (excluded by the repo-map lint, gated
+off by a capability marker, or a compile error). The later levels are then skipped for that run.
 
-## L2 — trigger
+## L2: trigger
 
 Each case is one headless session. Cases come from `<skill>/evals/**/prompt.md` (the Claude
 Code `plugin eval` layout; SAUT additionally reads `expect: fire | no-fire` and
@@ -50,17 +50,17 @@ How firing is observed: a `Skill` tool call naming the artifact (Claude Code, op
 skill file being read (Codex reads `SKILL.md` when a description matches), or the expansion
 of an explicit invocation. Two states matter beyond fired/not:
 
-- **`lost to <other>`** — the run fired a *different* skill. That is the description losing a
-  routing contest, the single most actionable trigger finding.
-- **`blocked`** — the invocation was made and *refused* (a gate, a permission rule). A finding
-  about the workspace, not about the author.
+- **`lost to <other>`**: the run fired a *different* skill, so the description lost a routing
+  contest. This is usually the most useful trigger finding to act on.
+- **`blocked`**: the invocation was made and *refused* (by a gate or a permission rule). This is
+  a finding about the workspace rather than about the author.
 
 **Caveat, always printed when observable:** the session sees every skill installed for that
 user, so an implicit prompt competes with them. The count is reported (`+24 competing`).
 Claude Code's config directory cannot be isolated without losing authentication, so the bench
-reports the contamination instead of pretending it isn't there.
+reports the competing count instead.
 
-## L3 — obedience
+## L3: obedience
 
 Every tool call is mapped into the Claude-shaped vocabulary allowlists are written in
 (`shell` → `Bash`, `apply_patch` → `Edit`, …) and compared against the artifact's own
@@ -70,18 +70,18 @@ allowed only when every part matches some rule.
 
 Three outcomes per call:
 
-- **inside the allowlist** — nothing to report;
-- **denied** — the harness refused it (permission mode, sandbox, gate). Not a violation: the
-  guardrail worked;
-- **outside the allowlist** — it ran, and the declaration did not cover it. On a `grant`
-  harness that means the declaration was never a restriction; on a `prose` harness it is the
-  recorded degradation, measured.
+- **inside the allowlist**: nothing to report;
+- **denied**: the harness refused the call (permission mode, sandbox, gate). This is not a
+  violation, because the guardrail worked;
+- **outside the allowlist**: the call ran and the declaration did not cover it. On a `grant`
+  harness this means the declaration never restricted anything; on a `prose` harness it is the
+  recorded degradation, now measured.
 
 The bench pre-approves `Skill` (the mechanism under test) and withholds the shell, so a
 mutation attempt surfaces as a denial rather than running. Read-only commands still execute
 under the harness's own classifier.
 
-## L4 — scenario graders
+## L4: scenario graders
 
 Graders live beside the case, in Claude Code's `plugin eval` layout, so a suite written here
 works there when that CLI is enabled:
@@ -105,7 +105,7 @@ Each grader is a markdown file whose frontmatter carries its `type`:
 
 `source` picks what a grader reads: `last_message` (default), `trace`, `files`, or
 `{source: file, path: …}`. The judge is asked for one line of JSON and nothing else; a reply
-it cannot parse is a **failed** grader, never a silent pass, and the material is framed as
+it cannot parse counts as a **failed** grader rather than a pass, and the material is framed as
 data rather than instructions.
 
 An `evals/evals.json` written to the [agentskills.io](https://agentskills.io/skill-creation/evaluating-skills)
@@ -113,35 +113,35 @@ spec is imported too: each entry becomes a case and its `assertions` become rege
 
 ## Cases that cannot fire
 
-An implicit case against a skill with `disable-model-invocation: true` is unwinnable by
-construction — the harness is forbidden to choose it. The bench says so and **spends nothing**
-on that case, instead of reporting a 0 % trigger rate the description cannot fix.
+An implicit case cannot pass for a skill with `disable-model-invocation: true`, because the
+harness is not allowed to choose it. The bench reports this and **spends nothing** on that case,
+instead of reporting a 0 % trigger rate that no change to the description could fix.
 
 ## Isolation and cost
 
 - Scratch workspace, deleted unless `--keep`. A harness may keep per-project state *outside*
-  the directory it was pointed at — Claude Code derives an auto-memory directory from the cwd —
-  so the bench removes its own such directories with the scratch (name-guarded, twice).
-  A consequence worth knowing while authoring: a skill that says "write to `memory/x.md`" can
-  land in the harness's memory rather than the workspace, which a `file_exists` grader catches.
+  the directory it was pointed at (Claude Code derives an auto-memory directory from the cwd),
+  so the bench removes those directories together with the scratch, with a name check applied
+  twice. When authoring, note that a skill that says "write to `memory/x.md`" can write into the
+  harness's memory rather than the workspace; a `file_exists` grader catches this.
 - Codex runs `--sandbox read-only --ephemeral`;
   opencode gets deny-by-default permissions; Claude runs `--permission-mode dontAsk` with the
   grant above and `--setting-sources project`.
-- Cheap models by default (`haiku` — Haiku 5.5 on the Anthropic API with Claude Code 2.1.293 or
-  newer, Haiku 4.5 elsewhere; `gpt-6-luna` — needs Codex CLI 0.156.1 or newer). `--model`
-  overrides: one id for every harness, or one per harness —
+- Cheap models by default: `haiku` (Haiku 5.5 on the Anthropic API with Claude Code 2.1.293 or
+  newer, Haiku 4.5 elsewhere) and `gpt-6-luna` (needs Codex CLI 0.156.1 or newer). `--model`
+  overrides this with one id for every harness or one per harness, for example
   `--model claude-code=sonnet,codex=gpt-6.1-sol` (a Claude alias means nothing to Codex). The
   model each harness ran is recorded in the result. `--max-cost <usd>`
   stops the bench when Claude-reported spend reaches the ceiling (Codex and opencode do not
-  report cost — token totals are reported instead). `--judge-model` sets the L4 judge (default
+  report cost, so token totals are reported instead). `--judge-model` sets the L4 judge (default
   `haiku`); its cost counts against the same ceiling.
 - `--runs n` for a fire *rate* rather than a single sample. One run is a smoke test; three is
   the smallest number that distinguishes "always" from "sometimes".
 
 ## Output
 
-`~/.saut/results/<name>--<hash>/<timestamp>/matrix.json` — the full result: every trace with its
-tool calls, usage, cost and the path to the raw event stream under `traces/`. `--out` moves
+The full result is written to `~/.saut/results/<name>--<hash>/<timestamp>/matrix.json`: every
+trace with its tool calls, usage, cost and the path to the raw event stream under `traces/`. `--out` moves
 it, `--json` prints it. Exit code 1 when the compile failed, a fire rate is 0, a control
 fired, a call landed outside the allowlist, or a scenario scored below 100 %.
 
@@ -151,8 +151,8 @@ keyed by its name and a hash of its real path, so a run from the CLI and one fro
 share a history. `$SAUT_HOME` moves the root (default `~/.saut`); `--out` writes one run
 anywhere. Runs from 0.6.x and earlier sit in `<artifact>/evals/results/` and are left alone.
 
-`--label <text>` names a run in that history and `--pair <id>` ties two runs together — the
-Studio's **Measure** uses them for a before/after: the same cases, harnesses and models, once on
+`--label <text>` names a run in that history and `--pair <id>` ties two runs together. The
+Studio's **Measure** uses them for a before/after comparison: the same cases, harnesses and models, once on
 the file as saved and once on an unsaved edit placed in a throwaway copy of the skill (of the
 whole pack, in a TAUT pack), each side a separate `saut test` process. The project is never
 written.
@@ -161,4 +161,4 @@ written.
 
 A harness with a `runner` entry in `lib/harnesses/<id>.json` and a parser in
 `lib/bench/runners.mts` joins the matrix. The parser's only job is turning that harness's
-event stream into `Trace`; everything else — cases, scratch, obedience, budget — is shared.
+event stream into `Trace`. Everything else (cases, scratch, obedience, budget) is shared.

@@ -35,4 +35,4 @@ body:
     id: shape
     attributes:
       label: What it might look like
-      description: Optional — the output you would want to see.
+      description: Optional. The output you would want to see.

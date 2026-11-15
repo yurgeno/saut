@@ -1,4 +1,4 @@
-# The Studio — `saut studio`
+# The Studio: `saut studio`
 
 ```bash
 saut studio                      # the start page: enter a git repository URL
@@ -8,34 +8,34 @@ saut studio https://github.com/o/r   # a remote repository, read-only
 ```
 
 **Remote repositories.** With no argument the Studio opens a start page with one field: a git
-repository URL (the forms `saut lint` takes — `https://`, `git@host:…`, `ssh://`, a GitHub or
+repository URL, in any form `saut lint` takes (`https://`, `git@host:…`, `ssh://`, a GitHub or
 GitLab browse URL, `<url>#<ref>:<path>`). A Studio over a local folder has the same field in its
 header. **Scan** fetches one commit read-only (no submodules, no hooks, symlinks as plain files)
 and shows it in the same tab: the same Overview, findings, costs and source, with a bar naming
 the repository and commit and a **← Close** button (the browser's Back works too). Behind it a
-read-only Studio of its own serves that repository on another loopback port; the page never
-visits it — this Studio relays the page's calls to it, so it stays one page on one origin.
-Nothing there writes or runs — save, fixes, suppressions, the bench, agent review and pack
-validation are refused by the server, not only hidden; an installed content scanner may still run
-on it. Close removes the fetched copy; whatever is still open (at most four, the oldest goes
+read-only Studio of its own serves that repository on another loopback port. The page never
+visits it directly: this Studio relays the page's calls, so everything stays one page on one
+origin. Nothing in that view writes or runs. Save, fixes, suppressions, the bench, agent review
+and pack validation are refused by the server, not only hidden; an installed content scanner may
+still run on it. Close removes the fetched copy; whatever is still open (at most four, the oldest goes
 first) is removed when the Studio stops. A reload keeps the open repository.
 
 A local page over the same library functions the CLI verbs call: nothing here re-implements a
 rule, a cost model or a runner. It opens on `127.0.0.1` with an ephemeral port and prints the
-address to open — it carries a one-time key (`/?k=…`); the browser trades it for a cookie and
-the key leaves the address bar, so a reload works and the address without the key opens
+address to open. The address carries a one-time key (`/?k=…`); the browser trades it for a
+cookie and the key leaves the address bar, so a reload works and the address without the key opens
 nothing. `Ctrl-C` stops it.
 
-The header names what the root is — a skills folder, a TAUT pack, or a compiled workspace — and
+The header names what the root is (a skills folder, a TAUT pack, or a compiled workspace) and
 carries the **target harnesses**: the matrix, the findings and the bench follow that choice
 (remembered per browser). Under it, a pill says how old the vendor guidance is (amber after 60
 days: run `saut guidance`); in a TAUT pack the deployment's model-ladder findings sit next to it.
 
 ## Overview
 
-Where the Studio opens. Totals for the root — high findings, security findings, outdated
-settings (guidance class A), prompt hypotheses (class B), mechanical fixes, tokens paid in every
-session — and one row per skill or agent: its high/medium/security counts, guidance A·B·D,
+This is where the Studio opens. It shows totals for the root (high findings, security findings,
+outdated settings from guidance class A, prompt hypotheses from class B, mechanical fixes, tokens
+paid in every session) and one row per skill or agent: its high/medium/security counts, guidance A·B·D,
 fixable findings, always-on and on-invoke tokens, and what its allowlist is on each target
 harness. Sort by any column, filter by name, kind or "only with findings"; a row opens the
 artifact. New skills and agents start here.
@@ -44,29 +44,30 @@ Rows are per skill or agent: copies of one skill in several harness folders are 
 **N copies** pill (hover for the paths), and a finding every copy has is counted once.
 
 The **Agent workspace** card lists the hooks, MCP servers, settings, instruction files, commands,
-plugin manifests and executed code with findings — one block per file (identical instruction files
-merged), each finding with its line, what it means and how to fix it — and, folded, what is there:
+plugin manifests and executed code with findings. There is one block per file (identical
+instruction files are merged), and each finding shows its line, what it means and how to fix it.
+A folded section lists what is there:
 what loads into every session (with tokens), the hooks and helper commands the harness runs, the MCP
 servers, and the code behind them with what runs it and what it can do (network, processes,
 credentials, dynamic code). Its findings count in the totals.
 
-The **Security** card lists every security rule that fires — and the privilege rules that make
-an injection dangerous (no allowlist, a model-invocable writer, dynamic context) — with the
-artifacts it fires in; a rule filters the table to them. It says which content scanner is
-installed (SkillSpector, Snyk Agent Scan, Cisco skill-scanner — rented, never bundled), runs it
-on the root, and when none is installed says so and links them, rather than implying a clean
-bill. A scan's findings join the Overview and each artifact's Problems until the next scan. The
+The **Security** card lists every security rule that fires, plus the privilege rules that make
+an injection dangerous (no allowlist, a model-invocable writer, dynamic context), with the
+artifacts each one fires in; clicking a rule filters the table to them. The card says which
+content scanner is installed (SkillSpector, Snyk Agent Scan or Cisco skill-scanner; SAUT uses an
+installed one and never bundles it) and runs it on the root. When none is installed, it says so
+and links them, so a missing scan is not mistaken for a clean result. A scan's findings join the Overview and each artifact's Problems until the next scan. The
 card also counts the findings suppressed in `saut.json` and shows a stale or invalid entry.
 
 ## Skill
 
 **Editor, two views of one file.**
 
-- *Form* — name, description (with a live character count against the listing cap: that text
+- *Form*: name, description (with a live character count against the listing cap: that text
   is paid in every session), argument hint, invocation flags, model and effort, the tool
   picker (harness registry plus MCP catalog, with a scope box for `Bash(git status *)`), the
   `metadata.taut` wiring in a TAUT pack, and the body in a Markdown editor.
-- *Source* — the whole file, exactly as saved: capability-marker branches, comments, keys the
+- *Source*: the whole file, exactly as saved: capability-marker branches, comments, keys the
   form does not show.
 
 Edits cross between the two in both directions.
@@ -80,17 +81,17 @@ against the hash the file was opened with, so an edit made meanwhile in an IDE i
 overwritten. `Ctrl/⌘+S` saves. A new artifact is emitted from the form into the spec layout.
 
 Any edit shows **● unsaved changes**; opening another artifact, starting a new one or reverting
-asks first. While you type, the inspector re-lints the *unsaved* text (marked **live —
+asks first. While you type, the inspector re-lints the *unsaved* text (marked **live,
 unsaved**); nothing is written.
 
 **Inspector.**
 
-- *Problems* — findings for the target harnesses, grouped: security, current guidance,
+- *Problems*: findings for the target harnesses, grouped: security, current guidance,
   privileges, hygiene and cost, syntax, TAUT wiring. Each says what it is, how to fix it and
   why it matters, links to its rule, and jumps to its line (a frontmatter line focuses the form
   field, a body line is selected in the editor; lines with high and medium findings are tinted
-  in the editors). Vendor-guidance findings show their class — A outdated, B a hypothesis to
-  change only against a bench, D hardening — the date the data was verified and its sources.
+  in the editors). Vendor-guidance findings show their class (A outdated, B a hypothesis to
+  change only against a bench, D hardening), the date the data was verified and its sources.
   A finding with a mechanical fix has a button that opens the diff; **Apply and save** writes
   it and re-lints. The server applies only a fix the linter proposes for the file as it is at
   that moment, and refuses if the file changed since the preview; with unsaved edits, applying
@@ -98,24 +99,24 @@ unsaved**); nothing is written.
   finding only or the whole rule for this artifact, the `saut.json` diff, then the write. A
   suppressed finding stays listed, with its reason, under *Suppressed*, and can be lifted the
   same way (see [RULES.md](RULES.md#suppressing-a-finding)).
-- *Agent review* — one call to Claude (`claude -p`, the model you pick; `sonnet` by default)
+- *Agent review*: one call to Claude (`claude -p`, the model you pick; `sonnet` by default)
   with the file, its active findings, the vendor-guidance entries SAUT tracks (each with its date
   and sources) and the harness semantics. Before the call a confirmation says how many input
   tokens that is; the cost Claude Code reports is shown after. The reviewer may only propose
-  changes that cite a finding or a guidance entry, as class A (outdated), B (prompt wording — a
+  changes that cite a finding or a guidance entry, as class A (outdated), B (prompt wording, a
   hypothesis) or D (hardening), and is told to keep hard gates, approvals and exact procedures
   verbatim. Each proposal is a search/replace the server checks (its text must occur exactly
   once), applies in memory and re-lints: the card says which findings it resolves and which it
   introduces, with the diff. **Apply to editor** puts it into the Source view as an unsaved
-  edit — then Save (A, D) or measure it in the Bench (B). Nothing is written by the review, and
+  edit; then save it (A, D) or measure it in the Bench (B). Nothing is written by the review, and
   it runs in an empty directory with no tools, the prompt on its stdin (never on the command
   line); a prompt over 150 000 tokens is refused. The review is kept for the record under
   `~/.saut/results/<artifact>/reviews/`. It sends the file to Claude through your Claude Code
-  login — the same as asking Claude Code about it; mind that for confidential material. Without
+  login, the same as asking Claude Code about it, so keep that in mind for confidential material. Without
   the `claude` CLI the section says so.
-- *Harnesses* — what the allowlist is on each target harness, and what that means.
-- *Cost* — always-on and on-invoke tokens, with the agents the artifact drags in.
-- *Compiled* (TAUT packs) — the exact bytes the installer would write on each harness, with
+- *Harnesses*: what the allowlist is on each target harness, and what that means.
+- *Cost*: always-on and on-invoke tokens, with the agents the artifact pulls in.
+- *Compiled* (TAUT packs): the exact bytes the installer would write on each harness, with
   that adapter's degradations.
 
 In a TAUT pack, line numbers are the file's: the engine's marker pass removes lines before
@@ -130,20 +131,20 @@ collapse into one Overview row. Files not in the lock stay editable.
 
 For the artifact open in the Skill view.
 
-- **Run** — level (L1–L4), runs, cost ceiling, one case or all, and per target harness with a
-  headless runner whether to run it and on which **model** (the registry's current and previous
+- **Run**: level (L1 to L4), runs, cost ceiling, one case or all, and, for each target harness
+  with a headless runner, whether to run it and on which **model** (the registry's current and previous
   models as suggestions; empty means the cheap default). Before anything runs, the estimate says
-  how many model runs that is and — from this artifact's earlier runs — about what it costs;
+  how many model runs that is and, based on this artifact's earlier runs, roughly what it costs;
   L1 is free. The events stream in live; the matrix names the model each harness ran.
-- **Measure: saved vs my edit** — with an unsaved edit in the Skill view, the same cases,
+- **Measure: saved vs my edit**: with an unsaved edit in the Skill view, the same cases,
   harnesses and models run twice: on the file as saved and on the edit, in a throwaway copy.
   The two land in the history as a *before/after* pair and open side by side. This is how a
   class-B guidance change (prompt style) is meant to be made: one change, measured. A B finding
   links here.
-- **Cases** — the cases the bench runs: authored under `evals/<case>/prompt.md`, else three
+- **Cases**: the cases the bench runs: authored under `evals/<case>/prompt.md`, else three
   generated from the description. Edit one, add one, or write the generated ones as files to
   start a suite.
-- **History** — every run of this artifact (kept outside the project, in `~/.saut/results/`),
+- **History**: every run of this artifact (kept outside the project, in `~/.saut/results/`),
   newest first, with its label, level and per-harness results; open one, or select two and
   **Compare**: per harness, fire rate, control, calls outside the allowlist, scenario score and
   cost, with ▲/▼ for better and worse.
@@ -170,10 +171,10 @@ A mutating localhost UI, so it mirrors the TAUT panel's contour:
 
 - binds `127.0.0.1` only;
 - the page is served only through the printed address: its one-time key becomes an
-  `HttpOnly`, `SameSite=Strict` cookie — a local process that finds the port gets no page, so
+  `HttpOnly`, `SameSite=Strict` cookie, so a local process that finds the port gets no page and
   no token;
 - a per-session token, generated at start, carried in the page's `<meta>` and required in a
-  **custom** request header on every `/api` call — which forces a CORS preflight that is never
+  **custom** request header on every `/api` call, which forces a CORS preflight that is never
   answered;
 - the page runs no inline script: `script-src 'self'` only; the shell, script, stylesheet and
   the vendored editor are served by name from the Studio directory, never by a path the
@@ -181,16 +182,16 @@ A mutating localhost UI, so it mirrors the TAUT panel's contour:
 - an `Origin` check on POST and a `Host` check on everything (DNS-rebinding guard);
 - no CORS headers are ever sent, so a foreign page can read nothing; the page cannot be framed;
 - reads and writes are contained under the root the studio was started with (symlinks
-  resolved) and take only a skill's `SKILL.md` or an agent `.md` in an agents directory — not a
+  resolved) and take only a skill's `SKILL.md` or an agent `.md` in an agents directory, not a
   README, a `CLAUDE.md`, a command file or anything else under the root; the only other files
   written are a case `prompt.md` and `saut.json`, never a file sealed by `taut.lock`;
 - an existing file is replaced atomically (a temporary file renamed over it, its mode kept),
-  never written through a symlink, and re-hashed just before the rename — an edit saved
-  meanwhile elsewhere is refused, not overwritten; the before/after bench copies files, never
+  never written through a symlink, and re-hashed just before the rename, so an edit saved
+  elsewhere in the meantime is refused, not overwritten; the before/after bench copies files, never
   links, so a variant cannot reach the project through one;
 - a suppression goes into the nearest `saut.json`; when that one lies above the root the
   Studio says so rather than create a new one that would hide it;
-- paths cross the API relative to the root — the page is never told where the root lives;
+- paths cross the API relative to the root, and the page is never told where the root lives;
 - the SSE stream carries the token in its query (EventSource cannot set headers) and is
   read-only; no other route accepts the token in a query;
 - errors name files relative to the root, never where the root lives.

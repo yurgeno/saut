@@ -1,10 +1,10 @@
 cff-version: 1.2.0
 message: >-
-  If you use SAUT, or build on the concepts it implements — cross-harness
+  If you use SAUT, or build on the concepts it implements (cross-harness
   privilege semantics for the agent surface of a repository, the
   always-on/on-invoke cost passport, and trigger/obedience measurement
-  across harnesses — please cite it as below.
-title: "SAUT — Surface Assurance Under Trust"
+  across harnesses), please cite it as below.
+title: "SAUT: Surface Assurance Under Trust"
 type: software
 authors:
   - given-names: Yuriy
@@ -17,8 +17,8 @@ abstract: >-
   what no single harness will tell you: per harness, whether the declared tool allowlist
   is a restriction, a pre-approval grant, informational prose or a field
   dropped on render; what the artifact costs in every session versus on
-  invocation; and — by compiling it into a scratch workspace and running
-  each harness headlessly — whether the harness actually fires it and
+  invocation; and, by compiling it into a scratch workspace and running
+  each harness headlessly, whether the harness fires it and
   whether the run stays inside the declaration it made. The recorded
   semantics is data with provenance, and the bench measures it rather
   than asserting it.
@@ -37,5 +37,5 @@ keywords:
   - opencode
 repository-code: "https://github.com/yurgeno/saut"
 license: Apache-2.0
-version: 0.8.2
+version: 0.8.3
 date-released: '2026-11-15'
