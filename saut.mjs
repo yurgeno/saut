@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// SAUT (Skill Assurance Under Trust) — CLI entry: argv, help, dispatch.
+// SAUT (Surface Assurance Under Trust) — CLI entry: argv, help, dispatch.
 // Zero runtime dependencies, Node >= 24, ESM. This entry stays a thin PLAIN-JS shell;
 // the core under lib/ is TypeScript (.mts) executed natively by Node (type stripping —
 // no build step); `tsc --noEmit` is the checker (npm test runs it).
@@ -94,8 +94,9 @@ function parseArgs(argv) {
   return opts;
 }
 
-const HELP = `SAUT — Skill Assurance Under Trust — v${VERSION}
-Lint, cost and test agent skills and subagents for any harness.
+const HELP = `SAUT — Surface Assurance Under Trust — v${VERSION}
+Lint, cost and test the agent surface of a repository — skills, subagents, MCP servers,
+hooks, permissions and instruction files — for any harness.
 
 Usage: saut <command> [targets…] [options]
 

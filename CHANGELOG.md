@@ -5,6 +5,14 @@ versions are [semantic](https://semver.org/) and each release is tagged.
 
 ## [Unreleased]
 
+### Changed
+
+- **SAUT now stands for Surface Assurance Under Trust** (was Skill Assurance). Since 0.8.0 SAUT
+  checks the whole agent surface a harness loads from a repository: skills, subagents, MCP servers,
+  hooks and their scripts, settings and permissions, instruction files and plugins. The name, the
+  CLI, `saut.json` and every option stay the same. README, CLI help, `CITATION.cff`, package
+  keywords and the rules reference describe the agent surface instead of skills alone.
+
 ## [0.8.0] — 2026-11-15
 
 ### Added

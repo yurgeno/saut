@@ -8,7 +8,7 @@ import { saut, PACK, CATALOG } from './helpers.mjs';
 test('help / version / unknown command exit codes', async () => {
   assert.equal((await saut([])).code, 0);
   for (const v of [['version'], ['--version'], ['-V']]) assert.match((await saut(v)).stdout, /^\d+\.\d+\.\d+\n$/, v.join(' '));
-  for (const h of [['--help'], ['-h'], ['help']]) assert.match((await saut(h)).stdout, /^SAUT — Skill Assurance Under Trust/, h.join(' '));
+  for (const h of [['--help'], ['-h'], ['help']]) assert.match((await saut(h)).stdout, /^SAUT — Surface Assurance Under Trust/, h.join(' '));
   assert.equal((await saut(['bogus'])).code, 2);
   assert.equal((await saut(['lint', '--nope'])).code, 2);
   assert.equal((await saut(['lint', '-x'])).code, 2, 'a short unknown flag is a usage error too');

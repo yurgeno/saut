@@ -1,4 +1,4 @@
-// SAUT (Skill Assurance Under Trust) — the central data model.
+// SAUT (Surface Assurance Under Trust) — the central data model.
 //
 // Two kinds of artifacts share one passport: SKILLS (SKILL.md per the Agent Skills spec,
 // agentskills.io) and AGENTS (subagent definitions: markdown with frontmatter). Everything

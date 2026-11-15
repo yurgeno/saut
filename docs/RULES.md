@@ -1,5 +1,9 @@
 # SAUT lint rules
 
+The rules cover the whole agent surface of a repository: skills and subagents (Privileges,
+Safety, Hygiene and cost), and everything else a harness loads or runs — hooks and their scripts,
+MCP servers, settings and permissions, instruction files, commands and plugins (Agent workspace).
+
 Every rule cites its precedent: `S*` / `C*` / `T*` = findings of a 2026-08-24 privilege review of
 a production TAUT pack; named sources = external research or harness documentation. Severity is
 the rule's default; a rule may downgrade when the evidence is weaker.

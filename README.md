@@ -1,4 +1,4 @@
-# SAUT — Skill Assurance Under Trust
+# SAUT — Surface Assurance Under Trust
 
 [![test](https://github.com/yurgeno/saut/actions/workflows/test.yml/badge.svg)](https://github.com/yurgeno/saut/actions/workflows/test.yml)
 [![release](https://img.shields.io/github/v/release/yurgeno/saut)](https://github.com/yurgeno/saut/releases)
@@ -7,21 +7,29 @@
 ![platforms](https://img.shields.io/badge/platforms-linux%20%7C%20macos-informational)
 ![runtime deps](https://img.shields.io/badge/runtime%20deps-0-success)
 
-**Lint, cost and test agent skills and subagents — for any harness, from one source.**
+**Lint, cost and test the agent surface of a repository — skills, subagents, MCP servers, hooks,
+permissions and instruction files — for any harness, from one source.**
 
-An [agent skill](https://agentskills.io) is read by Claude Code, Codex, OpenCode, Cursor and
-Copilot, and each of them treats the same frontmatter differently. `allowed-tools` is a
-*grant* on Claude Code — it pre-approves, it does not restrict — informational prose on Codex
-and OpenCode, and dropped outright when a subagent is rendered to TOML. Nothing tells the
-author. Nothing counts what a skill costs in every session. Nothing checks that the tools its
-body uses are the tools it declared.
+A repository's **agent surface** is everything an AI coding agent loads or runs from it:
+[agent skills](https://agentskills.io) and subagents, MCP servers, hooks and the scripts they
+call, settings and permissions, always-on instruction files (`CLAUDE.md`, `AGENTS.md`, …),
+commands and plugins. Claude Code, Codex, Copilot, Cursor, OpenCode and the rest each read that
+surface differently. `allowed-tools` is a *grant* on Claude Code — it pre-approves, it does not
+restrict — informational prose on Codex and OpenCode, and dropped outright when a subagent is
+rendered to TOML. Nothing tells the author. Nothing counts what a skill costs in every session.
+Nothing checks that the tools its body uses are the tools it declared, or what a hook runs.
 
-SAUT does. It works on any skill folder; a [TAUT](https://github.com/yurgeno/taut) data pack
-is a first-class case, not a requirement.
+SAUT does: it answers *what can an agent do in this repository, on each harness, and what does
+it cost*. It works on any repository, folder or git URL; a [TAUT](https://github.com/yurgeno/taut)
+data pack is a first-class case, not a requirement.
+
+SAUT is not a malware scanner. Content scanners ask whether something is hostile; SAUT asks how
+much an agent could reach if it were — least privilege and blast radius. Run both: `--scan` calls
+an installed content scanner in the same run.
 
 ```
-saut lint  <skills or agents…>   privilege / correctness findings + per-harness enforcement
-saut cost  <skills or agents…>   always-on vs on-invoke token passport, budgets, real usage
+saut lint  <paths | git url…>   privilege / safety / workspace findings + per-harness enforcement
+saut cost  <paths | git url…>   always-on vs on-invoke token passport, budgets, real usage
 saut test  <skill or agent>      compile → does it trigger → does it obey → does it do the job
 saut studio [dir | url]          the local UI over all of it (no argument: scan a git URL)
 saut passport <…>                lint + cost + matrix (+ compiled previews) as one JSON
@@ -70,7 +78,7 @@ runtime dependencies — `npm install` fetches the typechecker and nothing else.
 ## Usage
 
 ```bash
-saut lint .                              # walk a tree: every SKILL.md + agents/*.md
+saut lint .                              # walk a tree: skills, agents and the agent workspace
 saut lint skills/dev-review              # one skill
 saut lint agents/dev-reviewer.md         # one agent
 saut lint . --harness claude-code,codex  # judge for a subset of harnesses
