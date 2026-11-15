@@ -5,6 +5,38 @@ versions are [semantic](https://semver.org/) and each release is tagged.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-15
+
+### Changed
+
+- **`saut report` writes a readable Markdown report.** It follows what a reader does with it: a
+  summary with what the agent setup can do (run shell commands, write files, use MCP tools, start
+  without being asked, read outside content) and the token cost, then the findings grouped by
+  problem, each with the files it affects, its evidence as quoted lines, the fix and whether the
+  CLI can apply it, then the smaller suggestions, the list of files and one line for every other
+  harness. For a repository on github.com or gitlab.com every evidence line links to the file at
+  the scanned commit. A local scan shows paths inside the scanned folder. The HTML and JSON
+  formats keep their structure.
+- **The report is for one harness.** `--view <id>` picks it (default `claude-code`). The scan
+  still covers every harness; the view keeps the findings that apply there and leaves out the
+  files the harness does not load, such as subagents on Copilot and Cursor.
+- The rule catalog (the title, why and fix shown by `lint`, the Studio, SARIF and the report) reads
+  as plain prose, without em dashes.
+
+### Added
+
+- Report JSON: `views` (counts, loaded files and cost per harness); on each artifact `can`
+  (`shell`, `edit`, `mcp`, `everything`), `startsOnItsOwn` and `readsOutside`; `source.label` for
+  a remote target.
+
+### Fixed
+
+- `bash-unscoped-readonly` and `codex-agent-sandbox` now name the harness they apply to (Claude
+  Code and Codex). Model and effort findings on frontmatter name Claude Code. Before, they counted
+  on every harness.
+
+[0.9.0]: https://github.com/yurgeno/saut/releases/tag/v0.9.0
+
 ## [0.8.3] - 2026-11-15
 
 ### Changed

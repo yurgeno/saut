@@ -6,7 +6,8 @@
 import path from 'node:path';
 import { runCost, runLint, VERSION, type Opts } from './commands.mts';
 import { guidanceStatus } from './guidance.mts';
-import { matrix } from './lint.mts';
+import { matrix, readsOutsideContent } from './lint.mts';
+import { ruleInfo } from './rules.mts';
 import { active } from './suppress.mts';
 import type { Diagnostic } from './types.mts';
 import { rel as relShown, shownText } from './util.mts';
@@ -22,7 +23,12 @@ const atGlance = isSecurity;
 const SEV = ['high', 'medium', 'low', 'info'] as const;
 
 export interface ReportFinding { code: string; category: string | null; title: string | null; severity: string; line: number | null; harness: string | null; message: string; fix: string | null; why: string | null; doc: string | null; heuristic: boolean; guidance: { class: string; verifiedAt: string; sources: string[] } | null; autofix: string | null; suppressed: string | null; file: string | null; in: string[] | null; evidence: { says: string; found: boolean; line: number | null; quote: string | null }[] | null }
-export interface ReportArtifact { kind: string; name: string; label: string; path: string; copies: string[]; identical: boolean; description: string; counts: Record<string, number>; enforcement: { harness: string; allowlist: string }[]; cost: { alwaysOnTokens: number; invokeTokens: number; transitiveTokens: number; over: string[] } | null; findings: ReportFinding[] }
+export interface ReportArtifact { kind: string; name: string; label: string; path: string; copies: string[]; identical: boolean; description: string; counts: Record<string, number>; enforcement: { harness: string; allowlist: string }[]; cost: { alwaysOnTokens: number; invokeTokens: number; transitiveTokens: number; over: string[] } | null; findings: ReportFinding[];
+  // what the allowlist lets it do (everything = no allowlist), whether the model may start it, whether it reads outside content
+  can: { shell: boolean; edit: boolean; mcp: boolean; everything: boolean }; startsOnItsOwn: boolean; readsOutside: boolean }
+// The report for one harness: the findings that apply there (a finding with `harness` applies only
+// to those), without the artifacts it does not load. One scan, filtered: never a separate lint.
+export interface ReportView { harness: string; title: string; counts: { high: number; medium: number; low: number; info: number }; artifacts: number; notLoaded: string[]; alwaysOnTokens: number; invokeTokens: number }
 export interface ReportWorkspaceUnit { kind: string; label: string; paths: string[]; identical: boolean; counts: Record<string, number>; findings: ReportFinding[] }
 export interface ReportWorkspace {
   files: number; byKind: Record<string, number>;
@@ -35,13 +41,14 @@ export interface ReportWorkspace {
 export interface Report {
   tool: { name: 'saut'; version: string };
   generatedAt: string;
-  source: { kind: 'remote'; url: string; ref: string | null; commit: string; path: string | null } | { kind: 'local'; path: string };
+  source: { kind: 'remote'; url: string; label: string; ref: string | null; commit: string; path: string | null } | { kind: 'local'; path: string };
   harnesses: string[];
   guidance: { verifiedAt: string; stale: boolean };
   taut: { deployment: string | null } | null;
   notes: string[];
   totals: { artifacts: number; files: number; skills: number; agents: number; workspaceFiles: number; high: number; medium: number; low: number; info: number; security: number; fixable: number; suppressed: number; repeated: number; guidanceA: number; guidanceB: number; guidanceD: number; alwaysOnTokens: number; instructionTokens: number; invokeTokens: number };
   security: { code: string; title: string; severity: string; groups: { severity: string; artifacts: string[] }[]; artifacts: string[] }[];
+  views: ReportView[];
   artifacts: ReportArtifact[];
   workspace: ReportWorkspace;
   other: ReportFinding[];          // findings anchored to no artifact (a model ladder, saut.json)
@@ -63,6 +70,10 @@ const countsOf = (fs: UnitFinding[]) => {
   const on = fs.filter((f) => !f.d.suppressed).map((f) => f.d);
   return Object.fromEntries([...SEV.map((s) => [s, on.filter((x) => x.severity === s).length]), ['security', on.filter(isSecurity).length], ['suppressed', fs.length - on.length]]);
 };
+const WRITERS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
+const canOf = (list: { base: string }[] | null) => list === null
+  ? { shell: true, edit: true, mcp: true, everything: true }
+  : { shell: list.some((t) => t.base === 'Bash' || t.base === 'PowerShell'), edit: list.some((t) => WRITERS.has(t.base)), mcp: list.some((t) => t.base.startsWith('mcp__')), everything: false };
 const CAN: [keyof NonNullable<Surface['caps']>, string][] = [['network', 'network'], ['subprocess', 'runs processes'], ['background', 'background process'], ['readsInput', 'reads hook input'], ['credentials', 'credentials'], ['dynamicCode', 'dynamic code']];
 
 // The agent workspace as one block — the same in the report and in the Studio: what loads into
@@ -103,10 +114,27 @@ export async function buildReport(targets: string[], opts: Opts): Promise<Report
       enforcement: matrix(a, lint.harnesses).map((m) => ({ harness: m.harness, allowlist: m.allowlist })),
       cost: l ? { alwaysOnTokens: l.line.alwaysOnTokens, invokeTokens: l.line.invokeTokens, transitiveTokens: l.line.transitive.reduce((n, t) => n + t.tokens, 0), over: l.over } : null,
       findings: u.findings.map((f) => finding(f.d, u, f)),
+      can: canOf(a.kind === 'skill' ? a.allowedTools : a.tools),
+      startsOnItsOwn: a.kind === 'skill' && a.modelInvocable,
+      readsOutside: readsOutsideContent(a),
     };
   }).sort((p, q) => (q.counts.high - p.counts.high) || (q.counts.medium - p.counts.medium) || p.name.localeCompare(q.name));
 
   const workspace = workspaceSection(lint.surfaces, units, rel);
+  const otherFindings = other.map((x) => finding(x));
+  const views: ReportView[] = lint.harnesses.map((h) => {
+    const applies = (f: ReportFinding) => !f.suppressed && (!f.harness || f.harness.split(',').includes(h.id));
+    const notLoaded = artifacts.filter((a) => a.enforcement.find((e) => e.harness === h.id)?.allowlist === 'n/a');
+    const loaded = artifacts.filter((a) => !notLoaded.includes(a));
+    const fs = [...loaded.flatMap((a) => a.findings), ...workspace.units.flatMap((u) => u.findings), ...otherFindings].filter(applies);
+    const k = (s: string) => fs.filter((f) => f.severity === s).length;
+    return {
+      harness: h.id, title: h.title, counts: { high: k('high'), medium: k('medium'), low: k('low'), info: k('info') },
+      artifacts: loaded.length, notLoaded: notLoaded.map((a) => a.label),
+      alwaysOnTokens: loaded.reduce((n, a) => n + (a.cost?.alwaysOnTokens ?? 0), 0) + workspace.instructions.reduce((n, i) => n + (i.tokens ?? 0), 0),
+      invokeTokens: loaded.reduce((n, a) => n + (a.cost?.invokeTokens ?? 0), 0),
+    };
+  });
 
   const sec = new Map<string, { code: string; title: string; bySeverity: Map<string, Set<string>> }>();
   for (const u of units) for (const f of u.findings) {
@@ -129,7 +157,7 @@ export async function buildReport(targets: string[], opts: Opts): Promise<Report
   return {
     tool: { name: 'saut', version: VERSION },
     generatedAt: new Date().toISOString(),
-    source: remote ? { kind: 'remote', url: remote.spec.url, ref: remote.spec.ref, commit: remote.commit, path: remote.spec.subpath || null }
+    source: remote ? { kind: 'remote', url: remote.spec.url, label: remote.spec.label, ref: remote.spec.ref, commit: remote.commit, path: remote.spec.subpath || null }
       : { kind: 'local', path: path.resolve(targets[0] ?? '.') },
     harnesses: lint.harnesses.map((h) => h.id),
     guidance: { verifiedAt: st.verifiedAt, stale: st.stale },
@@ -147,6 +175,7 @@ export async function buildReport(targets: string[], opts: Opts): Promise<Report
       const groups = [...e.bySeverity].sort((p, q) => SEV.indexOf(p[0] as typeof SEV[number]) - SEV.indexOf(q[0] as typeof SEV[number])).map(([severity, s]) => ({ severity, artifacts: [...s].sort() }));
       return { code: e.code, title: e.title, severity: groups[0].severity, groups, artifacts: groups.flatMap((g) => g.artifacts) };
     }).sort((p, q) => SEV.indexOf(p.severity as typeof SEV[number]) - SEV.indexOf(q.severity as typeof SEV[number]) || q.groups[0].artifacts.length - p.groups[0].artifacts.length || p.code.localeCompare(q.code)),
+    views,
     artifacts,
     workspace,
     other: other.map((x) => ({ ...finding(x), message: `${rel(x.path)}${x.line ? `:${x.line}` : ''} — ${shownText(x.message)}` })),
@@ -163,102 +192,198 @@ const kindsLine = (by: Record<string, number>) => Object.entries(by).sort((a, b)
 // ---- Markdown ------------------------------------------------------------------------------
 
 const cell = (s: string) => s.replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
-const tick = (s: string) => '`' + s.replace(/`/g, "'") + '`';
 
-function sourceLine(r: Report): string {
-  return r.source.kind === 'remote'
-    ? `${r.source.url}${r.source.ref ? ` · ref ${tick(r.source.ref)}` : ''} · commit ${tick(r.source.commit)}${r.source.path ? ` · path ${tick(r.source.path)}` : ''}`
-    : tick(r.source.path);
+
+// The Markdown report is written to be read: as a file in an editor, as a rendered page, pasted
+// into an issue. It is the report for ONE harness (the view), in the order a reader acts on it:
+// the summary, what to fix grouped by problem with its evidence, the smaller suggestions, the
+// files, then one line for every other harness of the same scan. Lines stay short, the only
+// table is the file list, and every evidence line links to the file at the scanned commit.
+
+// Engine messages are terse, with a dash between the fact and the advice; the report shows them
+// as two sentences.
+const plain = (s: string) => {
+  const t = s.replace(/\s+—\s+(\S)/g, (_m, c: string) => '. ' + c.toUpperCase()).trim();
+  return (t.charAt(0).toUpperCase() + t.slice(1)).replace(/([^.!?:)`"'”…])$/, '$1.');
+};
+const plural = (n: number, one: string, many = one + 's') => `${n} ${n === 1 ? one : many}`;
+const countsText = (c: Record<string, number>, keys = ['high', 'medium', 'low']) =>
+  keys.filter((k) => c[k]).map((k) => `${c[k]} ${k}`).join(', ') || 'none';
+const fmtNum = (n: number) => n.toLocaleString('en-US');
+
+// A link to a file (and line) at the scanned commit, for the hosts whose URLs we know.
+function linker(r: Report): (file: string, line?: number | null) => string | null {
+  if (r.source.kind !== 'remote') return () => null;
+  const [host, ...rest] = r.source.label.split('/');
+  const repo = rest.join('/').replace(/\.git$/, '');
+  const base = host === 'github.com' ? `https://github.com/${repo}/blob/${r.source.commit}/`
+    : host === 'gitlab.com' ? `https://gitlab.com/${repo}/-/blob/${r.source.commit}/` : null;
+  return base ? (file, line) => base + file.split('/').map(encodeURIComponent).join('/') + (line ? `#L${line}` : '') : () => null;
 }
 
-export function toMarkdown(r: Report): string {
-  const t = r.totals;
+export function defaultView(r: Report): string {
+  return r.views.find((v) => v.harness === 'claude-code')?.harness ?? r.views[0]?.harness ?? '';
+}
+
+export function toMarkdown(r: Report, viewId: string = defaultView(r)): string {
+  const view = r.views.find((v) => v.harness === viewId) ?? r.views[0];
+  const link = linker(r);
   const out: string[] = [];
-  out.push(`# SAUT report — ${r.source.kind === 'remote' ? r.source.url.replace(/^https?:\/\//, '').replace(/\.git$/, '') : path.basename(r.source.path)}`, '');
-  out.push(`- **Source:** ${sourceLine(r)}`);
-  out.push(`- **Generated:** ${r.generatedAt.replace('T', ' ').slice(0, 16)} UTC by saut ${r.tool.version}`);
-  out.push(`- **Harnesses:** ${r.harnesses.join(', ')}`);
-  out.push(`- **Vendor guidance verified:** ${r.guidance.verifiedAt}${r.guidance.stale ? ' (stale — re-verify with `saut guidance`)' : ''}`);
-  if (r.taut) out.push(`- **TAUT pack:** deployment ${r.taut.deployment ?? '—'}`);
-  out.push(`- **Verdict:** ${r.verdict.exit ? '❌' : '✅'} ${r.verdict.reason}`);
-  for (const n of r.notes) out.push(`- _${n}_`);
+  const name = r.source.kind === 'remote' ? r.source.label.replace(/^[^/]+\//, '').replace(/\.git$/, '') : path.basename(r.source.path);
+  const when = `${r.generatedAt.slice(0, 10)} at ${r.generatedAt.slice(11, 16)} UTC`;
+  // a local scan shows paths inside the scanned folder, never the machine's own path
+  const base = r.source.kind === 'local' ? r.source.path.replace(/\/+$/, '') + '/' : null;
+  const shown = (file: string) => base && file.startsWith(base) ? file.slice(base.length) : file;
+  const fileRef = (file: string, line: number | null, label = shown(file) + (line ? `, line ${line}` : '')) => {
+    const url = link(file, line);
+    return url ? `[${label}](${url})` : `\`${shown(file)}\`${line ? `, line ${line}` : ''}`;
+  };
+
+  out.push(`# SAUT report: ${name}`, '');
+  if (r.source.kind === 'remote') {
+    const commitUrl = link('', null)?.replace(/\/blob\/|\/-\/blob\//, (m) => m.includes('-') ? '/-/commit/' : '/commit/').replace(/\/$/, '');
+    const short = r.source.commit.slice(0, 7);
+    out.push(`Commit ${commitUrl ? `[${short}](${commitUrl})` : `\`${short}\``}${r.source.ref ? ` on \`${r.source.ref}\`` : ''}${r.source.path ? `, folder \`${r.source.path}\`` : ''},`);
+    out.push(`scanned on ${when} with SAUT ${r.tool.version}.`);
+  } else out.push(`Folder \`${name}\`, scanned on ${when} with SAUT ${r.tool.version}.`);
+  const checked = view ? view.artifacts + r.totals.workspaceFiles : r.totals.files + r.totals.workspaceFiles;
+  out.push(`Harness: **${view?.title ?? 'none'}**. ${plural(checked, 'agent file')} checked.`);
+  if (view?.notLoaded.length) out.push(`${view.title} does not load ${view.notLoaded.map((n) => `\`${n}\``).join(', ')}, so ${view.notLoaded.length === 1 ? 'its findings and cost are' : 'their findings and cost are'} left out.`);
+  for (const n of r.notes) out.push('', `*${plain(n)}*`);
+
+  if (!view) { out.push('', 'No skills, subagents or agent workspace files were found.', ''); return out.join('\n'); }
+  const inView = (f: ReportFinding) => !f.suppressed && (!f.harness || f.harness.split(',').includes(view.harness));
+  const loaded = r.artifacts.filter((a) => !view.notLoaded.includes(a.label));
+  type Item = { who: string; file: string; f: ReportFinding };
+  const items: Item[] = [
+    ...loaded.flatMap((a) => a.findings.filter(inView).map((f) => ({ who: a.label, file: f.file ?? a.path, f }))),
+    ...r.workspace.units.flatMap((u) => u.findings.filter(inView).map((f) => ({ who: u.paths[0], file: f.file ?? u.paths[0], f }))),
+  ];
+
+  // ---- summary ----
+  const c = view.counts;
   out.push('', '## Summary', '');
-  out.push('| Skills | Agents | Workspace files | High | Medium | Low | Security | Outdated (A) | Hypotheses (B) | Mechanical fixes | Suppressed | Tokens every session | Tokens on invoke |');
-  out.push('|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|');
-  out.push(`| ${t.skills} | ${t.agents} | ${t.workspaceFiles} | ${t.high} | ${t.medium} | ${t.low} | ${t.security} | ${t.guidanceA} | ${t.guidanceB} | ${t.fixable} | ${t.suppressed} | ${t.alwaysOnTokens} | ${t.invokeTokens} |`);
-  out.push('', `_Counts are per finding, once for every copy of a skill or file (${t.repeated} repeated in copies). Tokens every session = skill listings + always-on instructions (${t.instructionTokens})._`);
-
-  out.push('', '## Security at a glance', '');
-  if (!r.security.length) out.push('No security or privilege findings. SAUT\'s own rules only — a content scanner (`--scan`) adds injection and exfiltration analysis.');
-  else {
-    out.push('| Severity | Rule | Where |', '|---|---|---|');
-    for (const s of r.security) out.push(`| ${s.groups.map((g) => `${g.severity} ${g.artifacts.length}`).join(' · ')} | ${cell(s.title)} (${tick(s.code)}) | ${s.groups.map((g) => (s.groups.length > 1 ? `**${g.severity}:** ` : '') + cell(g.artifacts.join(', '))).join('<br>')} |`);
+  const total = c.high + c.medium + c.low + c.info;
+  out.push(total ? `**${countsText(c)}${c.info ? `, ${plural(c.info, 'note')}` : ''}.** ${c.high ? 'Fix the high findings first.' : c.medium ? 'No high findings.' : 'Only small suggestions.'}` : '**Nothing to fix.**');
+  if (r.totals.suppressed) out.push('', `${plural(r.totals.suppressed, 'finding is', 'findings are')} suppressed in \`saut.json\` and not counted.`);
+  const n = loaded.length;
+  const cap = (p: (a: ReportArtifact) => boolean) => loaded.filter(p).length;
+  const lines: string[] = [];
+  if (n) {
+    lines.push(`- Run shell commands: ${cap((a) => a.can.shell)} of ${n}`);
+    lines.push(`- Write or edit files: ${cap((a) => a.can.edit)} of ${n}`);
+    if (cap((a) => a.can.mcp)) lines.push(`- Use MCP tools: ${cap((a) => a.can.mcp)} of ${n}`);
+    if (cap((a) => a.can.everything)) lines.push(`- Have no tool list, so every tool is available: ${cap((a) => a.can.everything)} of ${n}`);
+    const auto = cap((a) => a.startsOnItsOwn && (a.can.shell || a.can.edit));
+    if (auto) lines.push(`- Start without being asked and can change things: ${plural(auto, 'skill')}`);
+    if (cap((a) => a.readsOutside)) lines.push(`- Read outside content such as tickets or web pages: ${cap((a) => a.readsOutside)} of ${n}`);
   }
+  const w = r.workspace;
+  lines.push(w.hooks.length || w.mcp.length
+    ? `- Hooks: ${w.hooks.length}. MCP servers: ${w.mcp.length}.`
+    : '- Hooks and MCP servers: none found');
+  out.push('', 'What the agent setup can do:', '', ...lines);
+  out.push('', `Token cost: ${fmtNum(view.alwaysOnTokens)} tokens in every session for descriptions${r.totals.instructionTokens ? ' and instruction files' : ''}, up to ${fmtNum(view.invokeTokens)} more when all of them run.`);
+  const over = loaded.filter((a) => a.cost?.over.length);
+  if (over.length) out.push('', `Over budget: ${over.map((a) => `\`${a.label}\` (${a.cost!.over.join('; ')})`).join(', ')}.`);
 
-  if (r.artifacts.length) {
-    out.push('', '## Artifacts', '');
-    out.push(`| Artifact | High | Medium | Low | Security | Always-on | On invoke | ${r.harnesses.join(' | ')} |`);
-    out.push(`|---|---:|---:|---:|---:|---:|---:|${r.harnesses.map(() => '---').join('|')}|`);
-    for (const a of r.artifacts)
-      out.push(`| ${a.kind} **${cell(a.label)}** | ${a.counts.high} | ${a.counts.medium} | ${a.counts.low} | ${a.counts.security} | ${a.cost?.alwaysOnTokens ?? '—'} | ${a.cost ? a.cost.invokeTokens + (a.cost.transitiveTokens ? ` +${a.cost.transitiveTokens}` : '') : '—'} | ${a.enforcement.map((e) => e.allowlist).join(' | ')} |`);
+  // ---- grouped findings ----
+  const SEVS = ['high', 'medium', 'low', 'info'];
+  const groups = [...items.reduce((m, it) => m.set(it.f.code, [...(m.get(it.f.code) ?? []), it]), new Map<string, Item[]>()).values()]
+    .map((g) => ({ code: g[0].f.code, items: g, top: Math.min(...g.map((x) => SEVS.indexOf(x.f.severity))) }))
+    .sort((p, q) => p.top - q.top || q.items.length - p.items.length || p.code.localeCompare(q.code));
+  const bySev = (g: Item[]) => SEVS.map((s) => [s, [...new Set(g.filter((x) => x.f.severity === s).map((x) => x.who))]] as const).filter(([, w]) => w.length);
+  const detail = (it: Item): string[] => {
+    const found = (it.f.evidence ?? []).filter((e) => e.found);
+    if (!found.length) return [`- ${fileRef(it.file, it.f.line)}: ${plain(it.f.message)}`];
+    return found.map((e) => `- ${fileRef(it.file, e.line ?? it.f.line)}: ${e.says}` + (e.quote ? `\n  > ${e.quote}` : ''));
+  };
+  const fixOf = (g: Item[]) => {
+    const auto = g.find((x) => x.f.autofix)?.f.autofix;
+    const own = [...new Set(g.map((x) => x.f.fix).filter((x): x is string => !!x))];
+    const rule = ruleInfo(g[0].f.code)?.fix;
+    return { text: own.length === 1 ? own[0] : rule ?? own[0] ?? auto ?? null, auto: !!auto, autoLabel: auto };
+  };
+
+  const main = groups.filter((g) => g.top <= 1);
+  const small = groups.filter((g) => g.top > 1);
+  if (main.length) {
+    out.push('', '## What to fix');
+    main.forEach((g, i) => {
+      const info = ruleInfo(g.code);
+      out.push('', `### ${i + 1}. ${g.items[0].f.title ?? info?.title ?? g.code}`, '');
+      for (const [s, who] of bySev(g.items)) out.push(`${s[0].toUpperCase() + s.slice(1)}: ${who.map((x) => `\`${x}\``).join(', ')}  `);
+      out[out.length - 1] = out[out.length - 1].replace(/ {2}$/, '');
+      if (info?.why) out.push('', info.why);
+      out.push('', 'Evidence:', '');
+      for (const it of g.items) out.push(...detail(it));
+      const fx = fixOf(g.items);
+      if (fx.text || fx.auto) out.push('', `**Fix:** ${fx.text ?? fx.autoLabel}${fx.auto ? ' The CLI can apply this: `saut lint . --fix`' : ''}`);
+      if (g.items.some((x) => x.f.heuristic)) out.push('', '*Based on reading the text, so it can be wrong. The evidence shows what it was based on.*');
+      out.push('', `Rule: \`${g.code}\``);
+    });
   }
-
-  for (const a of r.artifacts) {
-    out.push('', `### ${a.kind} ${a.label}`, '');
-    out.push(`${a.copies.length > 1 ? `${a.copies.length} copies${a.identical ? ', identical' : ', they differ'}: ${a.copies.map(tick).join(', ')}` : tick(a.path)}${a.description ? ` — ${cell(a.description)}` : ''}`, '');
-    if (a.cost?.over.length) out.push(`**Over budget:** ${a.cost.over.join('; ')}`, '');
-    if (!a.findings.length) { out.push('Clean.'); continue; }
-    for (const f of a.findings) {
-      const where = [f.line ? `line ${f.line}` : null, f.harness].filter(Boolean).join(' · ');
-      const g = f.guidance ? ` · guidance ${f.guidance.class}, verified ${f.guidance.verifiedAt}` : '';
-      out.push(`- **${f.suppressed ? 'suppressed' : f.severity}** ${tick(f.code)}${f.title ? ` ${f.title}` : ''}${where ? ` (${where})` : ''}${g}${f.heuristic ? ' · heuristic' : ''}`);
-      out.push(`  ${f.message}${f.in ? ` _(in ${f.in.join(', ')})_` : ''}`);
-      if (f.evidence && !f.suppressed) out.push(`  Why ${f.severity}:`, ...f.evidence.map((e) => `  ${evidenceLine(e)}  `));
-      if (f.suppressed) out.push(`  Suppressed: ${f.suppressed}`);
-      else if (f.autofix) out.push(`  Fix: ${f.autofix} (\`saut lint --fix\`)`);
-      else if (f.fix) out.push(`  Fix: ${f.fix}`);
+  if (small.length) {
+    out.push('', '## Smaller suggestions', '');
+    for (const g of small) {
+      const info = ruleInfo(g.code);
+      const who = [...new Set(g.items.map((x) => x.who))];
+      const sev = SEVS[g.top] === 'info' ? 'note' : SEVS[g.top];
+      out.push(`- **${g.items[0].f.title ?? info?.title ?? g.code}** (${sev}, ${g.items.length > 1 ? `${g.items.length} in ${plural(who.length, 'file')}` : `\`${who[0]}\``}, rule \`${g.code}\`)`);
+      for (const it of g.items) out.push(`  - ${fileRef(it.file, it.f.line)}: ${plain(it.f.message)}`);
+      const fx = fixOf(g.items);
+      if (fx.text) out.push(`  - Fix: ${fx.text}${fx.auto ? ' The CLI can apply this: `saut lint . --fix`' : ''}`);
     }
   }
 
-  // ---- the agent workspace ----
-  const w = r.workspace;
-  out.push('', '## Agent workspace', '');
-  if (!w.files) out.push('No hooks, MCP servers, settings, instruction files, commands or plugin manifests found.');
-  else {
-    out.push(`${w.files} files: ${kindsLine(w.byKind)}.`);
+  // ---- files ----
+  out.push('', '## Files checked', '');
+  if (r.artifacts.length) {
+    out.push('| File | Can | Findings |', '|---|---|---|');
+    for (const a of r.artifacts) {
+      const url = link(a.path, null);
+      const nm = `${url ? `[${cell(a.label)}](${url})` : `\`${cell(a.label)}\``} (${a.kind === 'agent' ? 'subagent' : a.kind})`;
+      const can = a.can.everything ? 'every tool' : [a.can.shell ? 'Shell' : null, a.can.edit ? 'edit files' : null, a.can.mcp ? 'MCP tools' : null].filter(Boolean).join(', ') || 'read only';
+      const mine = a.findings.filter(inView);
+      const cnt = Object.fromEntries(SEVS.map((s) => [s, mine.filter((f) => f.severity === s).length]));
+      out.push(`| ${nm} | ${view.notLoaded.includes(a.label) ? 'not loaded' : can} | ${view.notLoaded.includes(a.label) ? '' : countsText(cnt, SEVS)} |`);
+    }
+  }
+  if (w.files) {
+    out.push('', `Agent workspace: ${w.files} files (${kindsLine(w.byKind).replace(/ · /g, ', ')}).`);
     if (w.instructions.length) {
-      out.push('', '**Loaded into every session**', '', '| File(s) | Harness | Tokens |', '|---|---|---:|');
-      for (const i of w.instructions) out.push(`| ${i.paths.map(tick).join(', ')}${i.note ? ` _(${i.note})_` : ''} | ${i.harnesses.join(', ')} | ${i.tokens ?? '—'} |`);
+      out.push('', 'Loaded into every session:', '');
+      for (const i of w.instructions) out.push(`- ${i.paths.map((p) => fileRef(p, null)).join(', ')}, read by ${i.harnesses.join(', ')}${i.tokens != null ? `, ${fmtNum(i.tokens)} tokens` : ''}${i.note ? ` (${i.note})` : ''}`);
     }
     if (w.hooks.length) {
-      out.push('', '**Hooks and commands the harness runs**', '', '| Event | Runs | Declared in |', '|---|---|---|');
-      for (const k of w.hooks) out.push(`| ${k.event}${k.matcher ? ` (${cell(k.matcher)})` : ''} | ${tick(k.run.length > 90 ? k.run.slice(0, 87) + '…' : k.run)} | ${tick(k.file)} |`);
+      out.push('', 'Hooks the harness runs:', '');
+      for (const k of w.hooks) out.push(`- ${k.event}${k.matcher ? ` (${k.matcher})` : ''}: runs \`${(k.run.length > 90 ? k.run.slice(0, 87) + '…' : k.run).replace(/`/g, "'")}\`, in ${fileRef(k.file, null)}`);
     }
     if (w.mcp.length) {
-      out.push('', '**MCP servers**', '', '| Server | Transport | Command / URL | File |', '|---|---|---|---|');
-      for (const m of w.mcp) out.push(`| ${cell(m.name)} | ${m.transport} | ${tick(m.target)} | ${tick(m.file)} |`);
+      out.push('', 'MCP servers:', '');
+      for (const m of w.mcp) out.push(`- ${m.name} (${m.transport}): \`${m.target.replace(/`/g, "'")}\`, in ${fileRef(m.file, null)}`);
     }
     if (w.code.length) {
-      out.push('', '**Code it runs** (read, never executed)', '', '| File | Run by | Can |', '|---|---|---|');
-      for (const c of w.code) out.push(`| ${tick(c.path)} | ${cell(c.runBy.join('; ') || '—')}${c.via.length ? ` _via ${cell(c.via.join(', '))}_` : ''} | ${c.can.join(', ') || '—'} |`);
+      out.push('', 'Code those run (read, never executed):', '');
+      for (const k of w.code) out.push(`- ${fileRef(k.path, null)}${k.runBy.length ? `, run by ${k.runBy.join('; ')}` : ''}${k.can.length ? `. Can: ${k.can.join(', ')}` : ''}`);
     }
-    for (const u of w.units) {
-      out.push('', u.paths.length > 1 ? `### ${u.kind} (${u.paths.length} copies)` : `### ${u.kind} ${tick(u.label)}`, '');
-      if (u.paths.length > 1) out.push(u.paths.map(tick).join(', '), '');
-      for (const f of u.findings) {
-        out.push(`- **${f.suppressed ? 'suppressed' : f.severity}** ${tick(f.code)}${f.title ? ` ${f.title}` : ''}${f.file ? ` · ${tick(f.file)}` : ''}${f.line ? ` (line ${f.line})` : ''}${f.heuristic ? ' · heuristic' : ''}`);
-        out.push(`  ${f.message}`);
-        if (f.suppressed) out.push(`  Suppressed: ${f.suppressed}`);
-        else if (f.fix) out.push(`  Fix: ${f.fix}`);
-      }
-    }
-  }
+  } else out.push('', 'No hooks, MCP servers, settings or instruction files were found.');
 
   if (r.other.length) {
     out.push('', '## Other findings', '');
-    for (const f of r.other) out.push(`- **${f.severity}** ${tick(f.code)} — ${f.message}${f.fix ? `\n  Fix: ${f.fix}` : ''}`);
+    for (const f of r.other) out.push(`- **${f.severity}** ${plain(f.message)}${f.fix ? ` Fix: ${f.fix}` : ''}`);
   }
-  out.push('', '---', '', `Rules: https://github.com/yurgeno/saut/blob/main/docs/RULES.md · enforcement: _restrict_ the harness holds the allowlist, _grant_ it pre-approves only, _prose_ / _dropped_ nothing holds it.`, '');
+
+  const others = r.views.filter((v) => v.harness !== view.harness);
+  if (others.length) {
+    out.push('', '## Other harnesses', '', 'The same files on other harnesses, from the same scan:', '');
+    for (const v of others) out.push(`- ${v.title}: ${countsText(v.counts)}${v.counts.info ? `, ${plural(v.counts.info, 'note')}` : ''}${v.notLoaded.length ? ` (does not load ${plural(v.notLoaded.length, 'file')})` : ''}`);
+    out.push('', `For one of them: \`saut report <target> --view <id>\` (${others.map((v) => v.harness).join(', ')}).`);
+  }
+
+  out.push('', '## About this report', '');
+  out.push(`SAUT read the files and ran nothing from the repository. Each rule is explained in the [rules reference](https://github.com/yurgeno/saut/blob/v${r.tool.version}/docs/RULES.md).`);
+  out.push(`Vendor guidance was last verified on ${r.guidance.verifiedAt}${r.guidance.stale ? ', which is overdue (`saut guidance`)' : ''}.`, '');
   return out.join('\n');
 }
 
@@ -349,11 +474,12 @@ ${r.other.length ? `<h2>Other findings</h2><section class="art"><ul>${r.other.ma
 
 // ---- the verb ----------------------------------------------------------------------------
 
-export async function cmdReport(opts: Opts & { format?: string }): Promise<number> {
+export async function cmdReport(opts: Opts & { format?: string; view?: string }): Promise<number> {
   const fmt = opts.json ? 'json' : (opts.format ?? (opts.out ? ({ '.html': 'html', '.htm': 'html', '.json': 'json' } as Record<string, string>)[path.extname(opts.out).toLowerCase()] ?? 'md' : 'md'));
   if (!['md', 'html', 'json'].includes(fmt)) { process.stderr.write(`saut report: --format md | html | json, got "${fmt}"\n`); return 2; }
   const r = await buildReport(opts._, opts);
-  const text = fmt === 'json' ? JSON.stringify(r, null, 2) + '\n' : fmt === 'html' ? toHtml(r) : toMarkdown(r);
+  if (opts.view && !r.views.some((v) => v.harness === opts.view)) { process.stderr.write(`saut report: --view takes one of ${r.views.map((v) => v.harness).join(', ')}, got "${opts.view}"\n`); return 2; }
+  const text = fmt === 'json' ? JSON.stringify(r, null, 2) + '\n' : fmt === 'html' ? toHtml(r) : toMarkdown(r, opts.view);
   if (opts.out) {
     const { writeFile } = await import('node:fs/promises');
     await writeFile(opts.out, text);

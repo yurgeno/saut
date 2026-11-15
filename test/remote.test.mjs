@@ -172,11 +172,18 @@ test('saut report on a repository URL: Markdown, HTML and JSON from one scan; ex
   try {
     const md = await saut(['report', `${repo.url}#next`]);
     assert.equal(md.code, 1, 'the symlink-turned-plain-file skill has high findings — exit as lint');
-    assert.match(md.stdout, /^# SAUT report — /);
-    assert.match(md.stdout, /commit `[0-9a-f]{40}`/);
-    assert.match(md.stdout, /## Security at a glance/);
-    assert.match(md.stdout, /### skill review/);
-    assert.match(md.stdout, /### skill extra/);
+    assert.match(md.stdout, /^# SAUT report: /);
+    assert.match(md.stdout, /^Commit `[0-9a-f]{7}` on `next`,/m);
+    assert.match(md.stdout, /^Harness: \*\*Claude Code\*\*\./m, 'the default view is Claude Code');
+    assert.match(md.stdout, /## Summary/);
+    assert.match(md.stdout, /## What to fix\n\n### 1\. /);
+    assert.match(md.stdout, /\| `review` \(skill\) \|/);
+    assert.match(md.stdout, /\| `extra` \(skill\) \|/);
+    assert.match(md.stdout, /## Other harnesses/);
+    assert.doesNotMatch(md.stdout, / — /, 'plain prose: no dash between fact and advice');
+    const cx = await saut(['report', repo.url, '--view', 'codex']);
+    assert.match(cx.stdout, /^Harness: \*\*OpenAI Codex CLI\*\*\./m);
+    assert.equal((await saut(['report', repo.url, '--view', 'nope'])).code, 2, 'an unknown view is a usage error');
     assert.doesNotMatch(md.stdout, /saut-remote-(?!src-)/, 'no throwaway path');
 
     const html = path.join(out, 'r.html');
@@ -193,6 +200,8 @@ test('saut report on a repository URL: Markdown, HTML and JSON from one scan; ex
     assert.match(j.verdict.reason, /high finding/);
     assert.equal(j.totals.skills, j.artifacts.filter((a) => a.kind === 'skill').length);
     assert.ok(j.artifacts.every((a) => Array.isArray(a.enforcement) && a.cost));
+    assert.deepEqual(j.views.map((v) => v.harness), j.harnesses, 'one view per harness');
+    assert.ok(j.artifacts.every((a) => typeof a.can.shell === 'boolean' && typeof a.startsOnItsOwn === 'boolean'));
     assert.equal((await saut(['report', repo.url, '--format', 'pdf'])).code, 2);
   } finally { await repo.cleanup(); await fs.rm(out, { recursive: true, force: true }); }
 });

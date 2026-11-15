@@ -40,7 +40,7 @@ const VALUE_FLAGS = {
   '--catalog': 'catalog', '--budget': 'budget', '--taut': 'taut', '--deployment': 'deployment',
   '--scanner': 'scanner', '--workspace': 'workspace', '--since': 'since', '--until': 'until',
   '--model': 'model', '--judge-model': 'judgeModel', '--landscape': 'landscape', '--case': 'case',
-  '--out': 'out', '--only': 'only', '--label': 'label', '--pair': 'pair', '--format': 'format',
+  '--out': 'out', '--only': 'only', '--label': 'label', '--pair': 'pair', '--format': 'format', '--view': 'view',
 };
 const NUMBER_FLAGS = {
   '--level': { key: 'level', min: 1, max: 4, int: true },
@@ -108,8 +108,9 @@ Commands
                        or a git repository URL, see Remote targets)
   cost [paths…]        token passport: always-on (listing) / on-invoke (body + wired agents)
   passport [paths…]    lint + cost + harness matrix as one JSON document
-  report [path | url]  one complete report: source + commit, totals, security at a glance, every
-                       artifact's enforcement, cost and findings with fixes. Markdown to stdout;
+  report [path | url]  one complete report: what the agent setup can do, findings grouped by
+                       problem with evidence and fixes, the files, cost. Markdown to stdout, for one
+                       harness (--view <id>, default claude-code; the others get a line each);
                        --format html|json, --out <file> (format from its extension). Exit as lint.
   harnesses            the capability registry (what each harness enforces / degrades)
   guidance             how old the vendor guidance (models, effort, prompting) is, and where this

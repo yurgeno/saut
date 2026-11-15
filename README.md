@@ -92,6 +92,7 @@ saut lint https://github.com/o/r/tree/main/skills/review   # a browse URL: ref +
 saut lint 'git@gitlab.example.com:g/r.git#v1.2:skills'     # <url>#<ref>:<path>
 
 saut report https://github.com/o/r       # one complete report (Markdown) for a dir or URL
+saut report https://github.com/o/r --view codex             # the same scan, read for Codex
 saut report https://github.com/o/r --out report.html       # self-contained HTML (or .json / --format)
 
 saut cost .                              # estimates (no key, no network)

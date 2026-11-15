@@ -163,7 +163,7 @@ export interface GuidanceOptions { harnesses: HarnessCaps[]; local: Map<string, 
 export function lintGuidance(a: Artifact, o: GuidanceOptions): Diagnostic[] {
   const out: Diagnostic[] = [];
   const d = (code: string, severity: Diagnostic['severity'], message: string, extra: Partial<Diagnostic> = {}, h?: HarnessCaps) =>
-    out.push({ code, severity, message, path: a.path, guidance: mark(code, h), ...extra });
+    out.push({ code, severity, message, path: a.path, guidance: mark(code, h), ...(h ? { harness: h.id } : {}), ...extra });
   const byId = new Map(o.harnesses.map((h) => [h.id, h]));
 
   // model / effort in frontmatter: Claude Code's fields (an opencode `provider/model` is skipped)

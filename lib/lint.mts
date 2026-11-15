@@ -112,6 +112,13 @@ export function enforcementFor(a: Artifact, h: HarnessCaps): string {
   return a.kind === 'skill' ? h.toolAllowlist : h.agentAllowlist;
 }
 
+// The body without lines that describe OTHER skills ("- **`/handoff`** writes a markdown file"):
+// a router listing them is not asking for that itself.
+const ownBody = (a: Artifact) => a.body.replace(/^[ \t]*(?:[-*]|\d+\.)?[ \t]*(?:\*\*)?`\/[\w:-]+`.*$/gm, '');
+// Does the artifact read outside content (a ticket, an issue, a web page)? The same test the
+// privilege rules use as evidence; the report counts it as a capability.
+export const readsOutsideContent = (a: Artifact) => ownBody(a).search(EXTERNAL_INPUT) >= 0;
+
 export function lintArtifact(a: Artifact, o: LintOptions): Diagnostic[] {
   const out: Diagnostic[] = [...a.fm.diagnostics];
   const primary = o.harnesses.find((h) => h.id === 'claude-code') ?? o.harnesses[0];
@@ -128,7 +135,7 @@ export function lintArtifact(a: Artifact, o: LintOptions): Diagnostic[] {
   // chain a missing allowlist leaves open; either alone is a weaker case; neither is hygiene.
   // A router that describes OTHER skills ("- **`/handoff`** writes a markdown file") is not
   // asking for that itself: lines led by a slash-command reference are someone else's job.
-  const own = a.body.replace(/^[ \t]*(?:[-*]|\d+\.)?[ \t]*(?:\*\*)?`\/[\w:-]+`.*$/gm, '');
+  const own = ownBody(a);
   const prose = `${a.description ?? ''}\n${own}`;
   // an explicit "changes nothing" / "report only" from the author outweighs a stray edit verb in a
   // proposal ("propose fixes that delete code"); a shell that mutates or dynamic context does not
@@ -238,7 +245,7 @@ export function lintArtifact(a: Artifact, o: LintOptions): Diagnostic[] {
     }
     // unscoped Bash on a read-only role where the harness supports scoping
     if (claimsReadOnly && list.some((t) => (t.base === 'Bash' || t.base === 'PowerShell') && !t.spec) && primary?.toolScopedSyntax)
-      out.push(d(a, 'bash-unscoped-readonly', 'medium', 'claims read-only but grants bare `Bash` — narrow it to the verbs it needs (`Bash(git status *)`, …) where the harness supports scoped rules', { line: listLine, precedent: 'S7' }));
+      out.push(d(a, 'bash-unscoped-readonly', 'medium', 'claims read-only but grants bare `Bash` — narrow it to the verbs it needs (`Bash(git status *)`, …) where the harness supports scoped rules', { line: listLine, precedent: 'S7', harness: primary.id }));
     // agent writes through Bash because Write was not granted
     if (a.kind === 'agent' && /\b(writes?|records?|saves?)\b[^.\n]{0,60}\b(\.md|file|report)\b/i.test(a.description + ' ' + a.body.slice(0, 2000))
       && list.some((t) => t.base === 'Bash') && !list.some((t) => t.base === 'Write' || t.base === 'Edit'))

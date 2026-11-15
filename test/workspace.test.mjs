@@ -117,7 +117,8 @@ test('CLI: the workspace is part of lint, report and SARIF; --no-workspace leave
   const only = JSON.parse((await saut(['lint', WS, '--json', '--no-workspace'])).stdout);
   assert.equal(only.surfaces.length, 0);
   const rep = await saut(['report', WS]);
-  assert.match(rep.stdout, /## Agent workspace/);
+  assert.match(rep.stdout, /^Agent workspace: \d+ files \(/m);
+  assert.match(rep.stdout, /^Hooks the harness runs:$/m);
 });
 
 test('a marketplace: a plugin in a subfolder is scanned from its own root', async () => {
@@ -167,8 +168,41 @@ test('security at a glance: one line per rule and severity — the worst case ne
     assert.deepEqual(ev('splits').map((e) => e.found), [true, false], 'medium: asks for changes, reads nothing from outside');
     assert.match(ev('reports')[0].says, /author says it changes nothing/);
     assert.deepEqual([ev('routed')[1].line, ev('routed')[1].quote], [8, 'Read the jira ticket. Report.'], 'evidence after blanked router lines points at the real line');
-    assert.match(toMarkdown(r), /Why high:\n  \+ asks for changes — line 5: “Fetch the jira ticket/);
+    assert.match(toMarkdown(r), /^- `skills\/reads-tickets\/SKILL\.md`, line 5: asks for changes\n  > Fetch the jira ticket/m, 'evidence as a list, the file relative to the scanned folder');
     const cli = await saut(['lint', dir]);
     assert.match(cli.stdout, /\+ reads outside content .* — line 5: "Fetch the jira ticket/);
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+test('report views: one scan filtered per harness; harness-only findings stay on their harness', async () => {
+  const fs = await import('node:fs/promises');
+  const os = await import('node:os');
+  const { buildReport, toMarkdown } = await import('../lib/report.mts');
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'saut-views-'));
+  try {
+    await fs.mkdir(path.join(dir, 'skills', 'look'), { recursive: true });
+    await fs.writeFile(path.join(dir, 'skills', 'look', 'SKILL.md'), '---\nname: look\ndescription: Read-only sweep of the repository. Invoke: look.\nallowed-tools: Read, Grep, Bash\ndisable-model-invocation: true\n---\nRun `git status` and grep the sources. Read-only.\n');
+    await fs.mkdir(path.join(dir, 'agents'), { recursive: true });
+    await fs.writeFile(path.join(dir, 'agents', 'scout.md'), '---\nname: scout\ndescription: Read-only scout. Never edits anything.\ntools: Read, Grep, Bash\n---\nRun `git log` and grep the sources.\n');
+    const r = await buildReport([dir], { _: [] });
+    const all = r.artifacts.flatMap((a) => a.findings.map((f) => ({ ...f, a: a.label })));
+    const bash = all.filter((f) => f.code === 'bash-unscoped-readonly');
+    assert.ok(bash.length && bash.every((f) => f.harness === 'claude-code'), 'scoped Bash exists on Claude Code only');
+    const sandbox = all.find((f) => f.code === 'codex-agent-sandbox');
+    assert.equal(sandbox?.harness, 'codex');
+    const view = (id) => r.views.find((v) => v.harness === id);
+    assert.deepEqual(view('copilot').notLoaded, ['scout'], 'Copilot does not load subagents');
+    assert.equal(view('codex').counts.info, 1);
+    assert.equal(view('claude-code').counts.info, 0);
+    const only = (id) => all.filter((f) => f.severity === 'medium' && f.harness && f.harness.split(',').includes(id)).length;
+    assert.equal(view('claude-code').counts.medium - view('codex').counts.medium, only('claude-code') - only('codex'), 'harness-tagged findings count on their harness only');
+    assert.ok(only('claude-code') >= bash.length);
+    assert.equal(r.artifacts.find((a) => a.label === 'look').can.shell, true);
+    assert.equal(r.artifacts.find((a) => a.label === 'look').startsOnItsOwn, false);
+    const md = toMarkdown(r, 'copilot');
+    assert.match(md, /^GitHub Copilot.* does not load `scout`/m);
+    assert.match(md, /\| `scout` \(subagent\) \| not loaded \|/);
+    assert.doesNotMatch(toMarkdown(r, 'codex'), /bash-unscoped-readonly/);
+    assert.doesNotMatch(md, new RegExp(dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'no machine path in the Markdown');
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
 });
