@@ -5,6 +5,16 @@ versions are [semantic](https://semver.org/) and each release is tagged.
 
 ## [Unreleased]
 
+## [0.8.2] — 2026-11-15
+
+### Changed
+
+- **The rules reference reads as plain prose.** `docs/RULES.md` is rewritten in plain sentences:
+  no em dashes, no slogans, and table cells without a precedent say `none`. Rule codes, severities,
+  section headings (and so every documentation anchor) and behaviour are unchanged.
+
+[0.8.2]: https://github.com/yurgeno/saut/releases/tag/v0.8.2
+
 ## [0.8.1] — 2026-11-15
 
 ### Changed
