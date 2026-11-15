@@ -1,6 +1,6 @@
 {
   "name": "saut",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "private": true,
   "description": "SAUT (Surface Assurance Under Trust) — lint, cost and test the agent surface of a repository for any harness",
   "license": "Apache-2.0",

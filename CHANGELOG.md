@@ -5,6 +5,16 @@ versions are [semantic](https://semver.org/) and each release is tagged.
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-11-15
+
+### Fixed
+
+- The TAUT adapter's import of the TAUT engine, whose path is known only at run time, is marked
+  for bundlers to leave alone. SAUT Cloud builds the engine for the browser, and the build failed
+  on it. Nothing changes when SAUT runs in Node.
+
+[0.9.1]: https://github.com/yurgeno/saut/releases/tag/v0.9.1
+
 ## [0.9.0] - 2026-11-15
 
 ### Changed

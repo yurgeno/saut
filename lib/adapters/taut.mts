@@ -82,7 +82,9 @@ export async function detectTaut(targets: string[], opts: { taut?: string | null
   if (!packRoot) return { ctx: null, note: null };
   const engine = await findEngine(opts.taut);
   if (!engine) return { ctx: null, note: `TAUT pack at ${packRoot} but no engine found (--taut <dir> or SAUT_TAUT_ENGINE) — linting as plain skills` };
-  const mod = async (f: string) => import(pathToFileURL(path.join(engine, 'lib', f)).href);
+  // the TAUT engine is found at run time; a bundler (SAUT Cloud builds this file for the browser)
+  // must leave the import alone
+  const mod = async (f: string) => import(/* webpackIgnore: true */ /* turbopackIgnore: true */ pathToFileURL(path.join(engine, 'lib', f)).href);
   const [constants, artifacts, markers, commands, config, caps] = await Promise.all([
     mod('constants.mts'), mod('artifacts.mts'), mod('markers.mts'), mod('commands.mts'), mod('config.mts'), mod('harness-caps.mts'),
   ]);
