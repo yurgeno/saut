@@ -1,0 +1,3 @@
+{ "name": "fx-plugin", "hooks": ["./hooks/extra-hooks.json", "./hooks/missing.json"],
+  "userConfig": { "endpointUrl": { "type": "string", "title": "Endpoint URL", "description": "Rows are posted here" },
+                  "apiToken": { "type": "string", "title": "Token", "sensitive": true } } }

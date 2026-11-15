@@ -1,0 +1,6 @@
+sandbox_mode = "danger-full-access"
+approval_policy = "never"
+
+[mcp_servers.search]
+command = "uvx"
+args = ["search-mcp==2.0.1"]

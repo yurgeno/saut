@@ -31,12 +31,26 @@ test('overview: one row per artifact with the counts a reader sorts by', async (
   const ctx = await st.get('/api/context');
   assert.equal(o.rows.length, ctx.artifacts.length);
   const dead = o.rows.find((r) => r.name === 'fx-dead');
-  assert.ok(dead.fixable > 0 && dead.medium > 0);
+  assert.ok(dead.fixable > 0 && dead.low > 0, 'a granted, unused tool is least-privilege hygiene');
   assert.ok(dead.alwaysOn > 0 && dead.invoke > 0);
   assert.equal(dead.enforcement['claude-code'], 'grant');
   assert.ok(!path.isAbsolute(dead.path));
   assert.equal(o.totals.artifacts, o.rows.length);
   assert.equal(o.totals.high, o.rows.reduce((n, r) => n + r.high, 0));
+  // the rule × severity filter: each row says how bad each of its rules is there, so "no-allowlist
+  // at high" can be told from "no-allowlist anywhere" (which is often every skill)
+  for (const r of o.rows) assert.deepEqual(Object.keys(r.sev).sort(), [...r.codes].sort());
+  const sec = o.security.rules.find((x) => x.code === 'no-allowlist');
+  if (sec) for (const g of sec.groups) assert.equal(o.rows.filter((r) => r.sev['no-allowlist'] === g.severity).length, g.artifacts.length, `no-allowlist at ${g.severity}`);
+  // "security" means one set of findings on every screen: the row's column, the Security card,
+  // and the Security section of the artifact's own panel
+  for (const r of o.rows) {
+    const a = await st.get('/api/artifact?path=' + encodeURIComponent(r.path));
+    const inPanel = a.findings.filter((x) => !x.suppressed && (x.category === 'security' || x.category === 'scanner'));
+    assert.equal(inPanel.length, r.security, `${r.name}: the Security column and the panel's Security section`);
+    for (const x of inPanel) assert.ok(o.security.rules.some((s) => s.code === x.code), `${r.name}: ${x.code} is on the Security card`);
+    for (const c of r.codes.filter((c) => o.security.rules.some((s) => s.code === c))) assert.ok(inPanel.some((x) => x.code === c), `${r.name}: ${c} is on the Security card, so it is in the panel's Security section`);
+  }
 });
 
 test('live check: an unsaved text is linted in memory, nothing is written', async () => {

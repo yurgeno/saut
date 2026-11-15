@@ -23,7 +23,7 @@ is a first-class case, not a requirement.
 saut lint  <skills or agents…>   privilege / correctness findings + per-harness enforcement
 saut cost  <skills or agents…>   always-on vs on-invoke token passport, budgets, real usage
 saut test  <skill or agent>      compile → does it trigger → does it obey → does it do the job
-saut studio [dir]                the local UI over all of it
+saut studio [dir | url]          the local UI over all of it (no argument: scan a git URL)
 saut passport <…>                lint + cost + matrix (+ compiled previews) as one JSON
 saut preview <name> [dir]        TAUT packs: the compiled bytes of one artifact per harness
 saut harnesses                   what each harness enforces, degrades, and lists
@@ -79,6 +79,12 @@ saut lint . --json | --sarif             # CI / IDE
 saut lint . --strict                     # exit 1 on medium findings too
 saut lint . --fix                        # the mechanical fixes as a diff (--write applies the safe ones)
                                          # a finding that does not apply: suppress it with a reason in saut.json
+saut lint https://github.com/o/r          # a remote repository: one commit, fetched read-only
+saut lint https://github.com/o/r/tree/main/skills/review   # a browse URL: ref + path
+saut lint 'git@gitlab.example.com:g/r.git#v1.2:skills'     # <url>#<ref>:<path>
+
+saut report https://github.com/o/r       # one complete report (Markdown) — dir or URL
+saut report https://github.com/o/r --out report.html       # self-contained HTML (or .json / --format)
 
 saut cost .                              # estimates (no key, no network)
 saut cost . --exact                      # counted by the Claude token-counting API
@@ -86,14 +92,39 @@ saut cost . --budget budgets.json        # or a saut.json {"budgets": {...}} up 
 saut cost . --workspace ~/ws             # + USED: invocations from that workspace's telemetry
 
 saut test skills/dev-review --level 3 --runs 3 --max-cost 1.00
-saut test skills/dev-review --model claude-code=sonnet,codex=gpt-6-sol   # a model per harness
+saut test skills/dev-review --model claude-code=sonnet,codex=gpt-6.1-sol   # a model per harness
 saut studio .                            # the local UI
+saut studio                              # start page: paste a git repository URL, scanned read-only in the same tab
 saut tools . --live                      # spawn catalog MCP servers, ask tools/list
 ```
 
 **Targets** are files or directories: a `SKILL.md`, a skill directory, an agent `.md`, or a
 tree to walk (`skills/`, `<project>/skills/`, `agents/`, `.claude/agents/`, … all fall out of
 the same walk).
+
+**The agent workspace.** Beyond skills and agents, `lint`, `report`, `passport` and the Studio
+read everything else a harness loads or runs from the project — hooks, MCP servers, settings and
+permissions, always-on instruction files (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, Copilot, Cursor,
+Cline and Devin rules), commands, plugin manifests (also plugins in subfolders of a marketplace)
+and the code those hooks and plugins run, followed script to script and read, never executed.
+Where each harness looks is data in `lib/workspace.json`. `--no-workspace` skips it.
+
+**Severity follows evidence, and copies count once.** A skill without an allowlist that only reads
+and reports is hygiene (low); one whose text asks to change files is medium; add untrusted input
+and it is high. The same skill in several harness folders, or one instruction text saved for
+several harnesses, is reported once with its copies listed. See [docs/RULES.md](docs/RULES.md).
+
+**Remote targets.** `lint`, `cost`, `passport`, `report` and `studio` also take a git repository URL — `https://`,
+`ssh://`, `git@host:owner/repo` or `file://`, optionally `#<ref>` (branch, tag or full commit
+id) and `:<path>` inside the repository; a GitHub/GitLab `…/tree/<ref>/<path>` or `…/blob/…`
+URL works as copied. SAUT fetches that one commit into a temporary directory, scans it, and
+removes it (`--keep` keeps it; `--timeout <s>` bounds the fetch, default 180). The content is
+treated as untrusted: no submodules, no hooks, no `ext::` transport, symlinks checked out as
+plain files, credentials from your git setup but never prompted for; `http://` and `git://`
+are refused, and so are `--live` (it would spawn the repository's MCP servers), `--fix`,
+`test` and `studio`. Output paths read `host/owner/repo@<commit>/…`; `--json` adds `sources`
+(url, ref, commit, path) and `--sarif` records `versionControlProvenance` with URIs relative
+to the repository root.
 
 **MCP catalog.** To judge `mcp__server__tool` names SAUT needs a catalog: a TAUT
 `catalog/mcp.json` (`servers.<id>.{serverKey, role, tools[]}`), a `.mcp.json` or an

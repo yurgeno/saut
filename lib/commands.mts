@@ -1,6 +1,7 @@
 // CLI verbs: lint / cost / passport / harnesses / tools. Each verb is also a library
 // function (the Studio server and the TAUT adapter call the same code).
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadHarnesses } from './caps.mts';
@@ -21,13 +22,18 @@ import { newResultsDir } from './bench/results.mts';
 import { startStudio } from './studio/server.mts';
 import type { BenchResult } from './bench/types.mts';
 import type { AgentArtifact, Artifact, Budgets, CostLine, Diagnostic, HarnessCaps, ToolRegistry } from './types.mts';
-import { c, count, exists, fail, isDir, readText, rel } from './util.mts';
+import { c, count, exists, fail, isDir, readText, rel, shownText, toJson } from './util.mts';
+import type { Fetched } from './remote.mts';
+import { scanWorkspace, type Surface } from './workspace.mts';
+import { liveFindings, unitsOf, type Unit } from './copies.mts';
 
 export const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 export const VERSION: string = JSON.parse(await fs.readFile(path.join(ROOT, 'package.json'), 'utf8')).version;
 
 export interface Opts {
   _: string[];
+  remote?: Fetched[];       // remote targets, already fetched into throwaway directories (remote.mts)
+  noWorkspace?: boolean;    // skills and agents only (--no-workspace)
   json?: boolean;
   sarif?: boolean;
   harness?: string[];
@@ -123,7 +129,7 @@ export async function load(targets: string[], opts: Opts): Promise<Loaded> {
 }
 
 // ---- lint ---------------------------------------------------------------------------
-export async function runLint(targets: string[], opts: Opts): Promise<{ diagnostics: Diagnostic[]; artifacts: Artifact[]; harnesses: HarnessCaps[]; taut: TautContext | null; note: string | null; ignored: string[]; scanNote?: string | null; scanners?: string[] }> {
+export async function runLint(targets: string[], opts: Opts): Promise<{ diagnostics: Diagnostic[]; artifacts: Artifact[]; surfaces: Surface[]; harnesses: HarnessCaps[]; taut: TautContext | null; note: string | null; ignored: string[]; scanNote?: string | null; scanners?: string[] }> {
   const { artifacts, harnesses, registry, agentsByName, taut, tautFindings, note, ignored } = await load(targets, opts);
   const diagnostics: Diagnostic[] = [...tautFindings];
   const local = await localCatalogs(harnesses);
@@ -140,6 +146,12 @@ export async function runLint(targets: string[], opts: Opts): Promise<{ diagnost
     diagnostics.push(...toFileLines(ds, a));
   }
   if (dep) diagnostics.push(...lintModelTiers(dep, harnesses, local));
+  // the rest of the agent workspace: hooks, MCP, settings, instructions, commands, manifests, code
+  const roots = taut ? [taut.packRoot] : (targets.length ? targets : ['.']);
+  const ws = opts.noWorkspace ? { surfaces: [] as Surface[], diagnostics: [] as Diagnostic[] } : await scanWorkspace(roots);
+  diagnostics.push(...ws.diagnostics);
+  const surfaced = new Set(ws.surfaces.map((s) => s.path));
+  const ignoredNow = ignored.filter((p) => !surfaced.has(p));
   let scanNote: string | null = null;
   let scanners: string[] = [];
   if (opts.scan) {
@@ -153,55 +165,95 @@ export async function runLint(targets: string[], opts: Opts): Promise<{ diagnost
   // linting part of what saut.json covers: only the linted artifacts' entries can be unused
   const scope = suppressions.file ? path.dirname(suppressions.file) : null;
   const whole = !scope || (targets.length ? targets : ['.']).some((t) => { const r = path.relative(path.resolve(t), scope); return r === '' || (!r.startsWith('..') && !path.isAbsolute(r)); });
-  const marked = applySuppressions(diagnostics, namesOf(artifacts), suppressions, whole ? {} : { only: new Set(artifacts.map((a) => a.name)) });
-  return { diagnostics: sortDiags(explain(marked)), artifacts, harnesses, taut, note, ignored, scanNote, scanners };
+  // a workspace file is suppressed by its path relative to the saut.json (".claude/settings.json")
+  const names = namesOf(artifacts);
+  const base = scope ?? path.resolve(roots[0]);
+  for (const s of ws.surfaces) names.set(s.path, path.relative(base, s.path).split(path.sep).join('/'));
+  const marked = applySuppressions(diagnostics, names, suppressions, whole ? {} : { only: new Set([...names.values()]) });
+  return { diagnostics: sortDiags(explain(marked)), artifacts, surfaces: ws.surfaces, harnesses, taut, note, ignored: ignoredNow, scanNote, scanners };
 }
 
 export async function cmdLint(opts: Opts): Promise<number> {
   if (opts.write && !opts.fix) { process.stderr.write('saut: --write applies fixes — use it with --fix\n'); return 2; }
   if (opts.fix) return cmdFix(opts);
-  const { diagnostics, artifacts, harnesses, taut, note, ignored, scanNote, scanners } = await runLint(opts._, opts);
+  const { diagnostics, artifacts, surfaces, harnesses, taut, note, ignored, scanNote, scanners } = await runLint(opts._, opts);
+  const root = path.resolve(taut ? taut.packRoot : opts._[0] ?? '.');
+  const { units, other } = unitsOf(artifacts, surfaces, diagnostics, (p) => path.relative(root, p).split(path.sep).join('/') || path.basename(p));
   // one verdict for every output format — a CI job that adds --json must not stop catching
   // "the target matched nothing"
   const live = active(diagnostics);
-  const exit = !artifacts.length ? 1
+  const found = artifacts.length + surfaces.length;
+  const exit = !found ? 1
     : live.some((x) => x.severity === 'high') || (opts.strict && live.some((x) => x.severity === 'medium')) ? 1 : 0;
-  if (opts.sarif) { process.stdout.write(JSON.stringify(toSarif(diagnostics, VERSION, path.resolve(opts._[0] ?? '.')), null, 2) + '\n'); }
-  else if (opts.json) { process.stdout.write(JSON.stringify({ version: VERSION, artifacts: artifacts.map((a) => ({ kind: a.kind, name: a.name, path: a.path })), ignored, diagnostics }, null, 2) + '\n'); }
+  const remote = opts.remote?.length === 1 && opts._.length === 1 ? opts.remote[0] : null;
+  if (opts.sarif) { process.stdout.write(toJson(remote
+    ? toSarif(diagnostics, VERSION, remote.root, { repositoryUri: remote.spec.url, revisionId: remote.commit, ...(remote.spec.ref ? { branch: remote.spec.ref } : {}) })
+    : toSarif(diagnostics, VERSION, path.resolve(opts._[0] ?? '.'))) + '\n'); }
+  else if (opts.json) {
+    process.stdout.write(toJson({
+      version: VERSION, ...(opts.remote?.length ? { sources: opts.remote.map(sourceOf) } : {}),
+      artifacts: artifacts.map((a) => ({ kind: a.kind, name: a.name, path: a.path })),
+      surfaces: surfaces.map(surfaceJson),
+      copies: units.filter((u) => u.paths.length > 1).map((u) => ({ kind: u.kind, name: u.name, identical: u.identical, paths: u.paths })),
+      ignored, diagnostics,
+    }) + '\n');
+  }
   else {
-    if (!artifacts.length) process.stdout.write('no skills or agents found\n');
+    if (!found) process.stdout.write('no skills, agents or agent workspace files found\n');
     // a target that is not a skill, an agent or a directory was silently dropped before
-    for (const p of ignored) process.stdout.write(c.yellow(`ignored ${rel(p)} — not a SKILL.md, an agent .md, or a directory\n`));
+    for (const p of ignored) process.stdout.write(c.yellow(`ignored ${rel(p)} — not a SKILL.md, an agent .md, a workspace file, or a directory\n`));
     if (taut) process.stdout.write(c.dim(`TAUT pack ${rel(taut.packRoot)} · engine ${rel(taut.engine)}${taut.engineCommit ? ` @${taut.engineCommit}` : ''}${taut.project ? ` · deployment ${taut.project.name}` : ''} — engine-parsed frontmatter, wiring checked against the catalog\n`));
-    else if (note) process.stdout.write(c.dim(note + '\n'));
+    else if (note) process.stdout.write(c.dim(shownText(note) + '\n'));
+    for (const f of opts.remote ?? []) process.stdout.write(c.dim(`remote ${f.spec.url}${f.spec.ref ? ` #${f.spec.ref}` : ''} @ ${f.commit.slice(0, 12)}${f.spec.subpath ? ` · ${f.spec.subpath}` : ''} — fetched read-only, removed after the run\n`));
     if (scanners?.length) process.stdout.write(c.dim(`content scan: ${scanners.join(', ')}\n`));
-    if (scanNote) process.stdout.write(c.yellow(scanNote + '\n'));
-    const byPath = new Map<string, Diagnostic[]>();
-    for (const x of diagnostics) byPath.set(x.path, [...(byPath.get(x.path) ?? []), x]);
-    for (const a of artifacts) {
-      const ds = byPath.get(a.path) ?? [];
-      const tag = a.kind === 'skill' ? 'skill' : 'agent';
-      const n = ds.filter((y) => !y.suppressed).length, s = ds.length - n;
-      process.stdout.write(`${c.bold(`${tag} ${a.name}`)} ${c.dim(rel(a.path))} — ${n ? count(n, 'finding') : c.green('clean')}${s ? c.dim(` (${s} suppressed)`) : ''}\n`);
-      const told = new Set<string>();   // the rule-level advice once per artifact; a concrete autofix every time
-      for (const x of ds.filter((y) => y.suppressed)) process.stdout.write(c.dim(`  suppressed ${x.code}${x.line ? `:${x.line}` : ''} — ${x.suppressed!.reason}\n`));
-      for (const x of ds.filter((y) => !y.suppressed)) {
+    if (scanNote) process.stdout.write(c.yellow(shownText(scanNote) + '\n'));
+    const byArtifact = new Map(artifacts.map((a) => [a.path, a]));
+    const printUnit = (u: Unit, label: string) => {
+      const n = u.findings.filter((f) => !f.d.suppressed).length, s = u.findings.length - n;
+      const copies = u.paths.length > 1 ? c.dim(` · ${u.paths.length} copies${u.identical ? ', identical' : ', they differ'}: ${u.paths.map(rel).join(', ')}`) : ` ${c.dim(rel(u.paths[0]))}`;
+      process.stdout.write(`${c.bold(label)}${copies} — ${n ? count(n, 'finding') : c.green('clean')}${s ? c.dim(` (${s} suppressed)`) : ''}\n`);
+      const told = new Set<string>();   // the rule-level advice once per unit; a concrete autofix every time
+      for (const f of u.findings.filter((y) => y.d.suppressed)) process.stdout.write(c.dim(`  suppressed ${f.d.code}${f.d.line ? `:${f.d.line}` : ''} — ${f.d.suppressed!.reason}\n`));
+      for (const f of u.findings.filter((y) => !y.d.suppressed)) {
+        const x = f.d;
         const sev = x.severity === 'high' ? c.red('high  ') : x.severity === 'medium' ? c.yellow('medium') : x.severity === 'low' ? 'low   ' : c.dim('info  ');
-        process.stdout.write(`  ${sev} ${x.code}${x.harness ? c.dim(` [${x.harness}]`) : ''}${x.line ? c.dim(`:${x.line}`) : ''} — ${x.message}${x.precedent ? c.dim(` (${x.precedent})`) : ''}\n`);
+        const where = u.paths.length > 1 && f.paths.length < u.paths.length ? c.dim(` (in ${f.paths.map(rel).join(', ')})`) : '';
+        const file = u.surface && x.path !== u.paths[0] ? c.dim(` ${rel(x.path)}`) : '';
+        process.stdout.write(`  ${sev} ${x.code}${x.harness ? c.dim(` [${x.harness}]`) : ''}${file}${x.line ? c.dim(`:${x.line}`) : ''} — ${shownText(x.message)}${x.precedent ? c.dim(` (${x.precedent})`) : ''}${where}\n`);
+        // why this severity — shown where it is a claim worth checking (high/medium); JSON has it always
+        if (x.evidence && (x.severity === 'high' || x.severity === 'medium'))
+          for (const e of x.evidence) process.stdout.write(c.dim(`         ${e.found ? '+' : '-'} ${e.says}${e.line ? ` — line ${e.line}` : ''}${e.quote ? `: "${shownText(e.quote)}"` : ''}\n`));
         if (x.autofix) process.stdout.write(c.dim(`         → ${x.autofix.label} (saut lint --fix)\n`));
         else if (x.fix && !told.has(x.code)) process.stdout.write(c.dim(`         → ${x.fix}\n`));
         told.add(x.code);
       }
-      const m = matrix(a, harnesses);
+    };
+    for (const u of units.filter((x) => !x.surface)) {
+      printUnit(u, `${u.kind} ${u.name}`);
+      const m = matrix(byArtifact.get(u.paths[0])!, harnesses);
       process.stdout.write(`  ${c.dim('enforcement')} ${m.map((r) => `${r.harness}=${r.allowlist}`).join(' · ')}\n`);
     }
-    // findings about saut.json itself (a stale or invalid suppression) belong to no artifact
-    const known = new Set(artifacts.map((a) => a.path));
-    for (const x of live.filter((y) => !known.has(y.path))) process.stdout.write(`${c.yellow(x.severity.padEnd(6))} ${x.code} ${c.dim(rel(x.path))} — ${x.message}\n`);
-    const hi = live.filter((x) => x.severity === 'high').length;
-    const med = live.filter((x) => x.severity === 'medium').length;
+    // the workspace: only what has findings is printed; the rest is counted
+    const ws = units.filter((x) => x.surface);
+    if (ws.length) {
+      const withFindings = ws.filter((u) => u.findings.length > 0);
+      const k = (kind: string) => surfaces.filter((s) => s.kind === kind).length;
+      const hooks = surfaces.reduce((n, s) => n + s.hooks.length, 0), mcp = surfaces.reduce((n, s) => n + s.mcp.length, 0);
+      process.stdout.write(`\n${c.bold('workspace')} ${c.dim(`— ${count(surfaces.length, 'file')}: ${([['instruction file', k('instructions')], ['command', k('command')], ['settings file', k('settings')], ['hook file', k('hooks')], ['manifest', k('manifest')], ['MCP file', k('mcp')], ['code module', k('code')]] as [string, number][]).filter(([, v]) => v).map(([n, v]) => count(v, n)).join(' · ')}${hooks ? ` · ${count(hooks, 'hook')}` : ''}${mcp ? ` · ${count(mcp, 'MCP server')}` : ''}`)}\n`);
+      for (const u of withFindings) printUnit(u, u.paths.length > 1 ? `${u.kind} ${u.name}` : u.kind);
+      const clean = ws.length - withFindings.length;
+      if (clean) process.stdout.write(c.dim(`  ${count(clean, 'other workspace file')} without findings (saut report lists them all)\n`));
+    }
+    // findings about saut.json itself (a stale or invalid suppression) and a pack's model ladder
+    for (const x of other.filter((y) => !y.suppressed)) process.stdout.write(`${c.yellow(x.severity.padEnd(6))} ${x.code} ${c.dim(rel(x.path))} — ${shownText(x.message)}\n`);
+    const uniq = liveFindings(units, other);
+    const hi = uniq.filter((x) => x.severity === 'high').length;
+    const med = uniq.filter((x) => x.severity === 'medium').length;
+    const low = uniq.filter((x) => x.severity === 'low' || x.severity === 'info').length;
     const sup = diagnostics.length - live.length;
-    if (artifacts.length) process.stdout.write(`\n${count(artifacts.length, 'artifact')}, ${count(live.length, 'finding')} (${hi} high, ${med} medium)${sup ? `, ${sup} suppressed in saut.json` : ''}\n`);
+    const repeated = live.length - uniq.length;
+    const named = units.filter((u) => !u.surface).length;
+    if (found) process.stdout.write(`\n${count(named, 'skill or agent', 'skills and agents')}${named !== artifacts.length ? ` (${count(artifacts.length, 'file')})` : ''}, ${count(surfaces.length, 'workspace file')} — ${count(uniq.length, 'finding')} (${hi} high, ${med} medium, ${low} low)${repeated ? c.dim(`, ${repeated} more repeated in copies`) : ''}${sup ? `, ${sup} suppressed in saut.json` : ''}\n`);
   }
   return exit;
 }
@@ -325,6 +377,9 @@ export async function cmdGuidance(opts: Opts): Promise<number> {
   return bad ? 1 : 0;
 }
 
+export const surfaceJson = (s: Surface) => ({ kind: s.kind, harness: s.harness, path: s.path, note: s.note, tokens: s.tokens, hooks: s.hooks.map((h) => ({ event: h.event, matcher: h.matcher, type: h.type, command: h.command, url: h.url })), mcp: s.mcp.map((m) => ({ name: m.name, transport: m.transport, command: m.command, url: m.url })), reachedBy: s.reachedBy, via: s.via, error: s.error });
+const sourceOf = (f: Fetched) => ({ url: f.spec.url, ref: f.spec.ref, commit: f.commit, path: f.spec.subpath || null });
+
 // ---- cost ---------------------------------------------------------------------------
 export async function runCost(targets: string[], opts: Opts): Promise<{ lines: { line: CostLine; over: string[]; artifact: Artifact }[]; harness: HarnessCaps | null; budgets: Budgets; usage: UsageData | null }> {
   const pre = opts.preloaded;
@@ -346,7 +401,7 @@ const k = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
 
 export async function cmdCost(opts: Opts): Promise<number> {
   const { lines, harness, budgets, usage } = await runCost(opts._, opts);
-  if (opts.json) { process.stdout.write(JSON.stringify({ version: VERSION, harness: harness?.id ?? null, budgets, usage: usage ? { workspace: usage.workspace, days: usage.days, from: usage.from, to: usage.to, probes: usage.probes, pathsRecorded: usage.pathsRecorded } : null, lines: lines.map((l) => ({ ...l.line, over: l.over, usage: usageFor(usage, l.artifact.name) })) }, null, 2) + '\n'); return lines.some((l) => l.over.length) ? 1 : 0; }
+  if (opts.json) { process.stdout.write(toJson({ version: VERSION, ...(opts.remote?.length ? { sources: opts.remote.map(sourceOf) } : {}), harness: harness?.id ?? null, budgets, usage: usage ? { workspace: usage.workspace, days: usage.days, from: usage.from, to: usage.to, probes: usage.probes, pathsRecorded: usage.pathsRecorded } : null, lines: lines.map((l) => ({ ...l.line, over: l.over, usage: usageFor(usage, l.artifact.name) })) }) + '\n'); return lines.some((l) => l.over.length) ? 1 : 0; }
   if (!lines.length) { process.stdout.write('no skills or agents found\n'); return 1; }
   const method = lines[0].line.method;
   process.stdout.write(`${c.bold('cost passport')} ${c.dim(`(${method}${harness ? `, listing per ${harness.id}` : ''})`)}\n`);
@@ -391,7 +446,7 @@ export async function cmdPassport(opts: Opts): Promise<number> {
       ...(taut ? { compiled } : {}),
     });
   }
-  process.stdout.write(JSON.stringify({ version: VERSION, taut: taut ? { packRoot: taut.packRoot, engine: taut.engine, engineCommit: taut.engineCommit, deployment: taut.project?.name ?? null } : null, passports: out }, null, 2) + '\n');
+  process.stdout.write(toJson({ version: VERSION, ...(opts.remote?.length ? { sources: opts.remote.map(sourceOf) } : {}), taut: taut ? { packRoot: taut.packRoot, engine: taut.engine, engineCommit: taut.engineCommit, deployment: taut.project?.name ?? null } : null, passports: out }) + '\n');
   return 0;
 }
 
@@ -458,7 +513,7 @@ export async function cmdTest(opts: Opts): Promise<number> {
   const outDir = opts.out ? path.resolve(opts.out) : await newResultsDir(a);
   const log = (e: { kind: string; text: string }) => { if (!opts.json) process.stderr.write(`${e.kind === 'fail' ? c.red(e.kind.padEnd(6)) : e.kind === 'ok' ? c.green(e.kind.padEnd(6)) : c.dim(e.kind.padEnd(6))} ${e.text}\n`); };
   if (!opts.json) process.stderr.write(`${c.bold(`bench ${a.kind} ${a.name}`)} ${c.dim(`level ${level} · runs ${opts.runs ?? 1} · ${taut ? `TAUT pack ${rel(taut.packRoot)} via ${rel(taut.engine)}` : 'generic'} · harnesses ${harnesses.filter((h) => h.runner).map((h) => h.id).join(',')}`)}\n`);
-  // --model sonnet (every harness) or --model claude-code=sonnet,codex=gpt-6-sol (per harness)
+  // --model sonnet (every harness) or --model claude-code=sonnet,codex=gpt-6.1-sol (per harness)
   const perHarness = opts.model?.includes('=') ? Object.fromEntries(opts.model.split(',').map((x) => x.split('=').map((s) => s.trim())).filter(([k, v]) => k && v)) : undefined;
   const ids = new Set(harnesses.map((h) => h.id));
   for (const [h, m] of (perHarness ? Object.entries(perHarness) : opts.model ? [['', opts.model]] : []) as [string, string][]) {
@@ -512,12 +567,23 @@ function printBench(r: BenchResult): void {
 }
 
 // ---- studio (the loopback UI over the same verbs) ----------------------------------------
+// `saut studio` with no argument opens the launcher: a page that takes a repository URL.
+// `saut studio <dir>` opens that folder; `saut studio <url>` a remote repository, read-only.
 export async function cmdStudio(opts: Opts): Promise<number> {
-  const root = path.resolve(opts._[0] ?? '.');
-  if (!(await isDir(root))) { process.stderr.write(`saut studio <dir>: ${root} is not a directory\n`); return 2; }
-  const h = await startStudio(root, opts);
+  const repo = opts.remote?.[0];
+  const launcher = !opts._[0];
+  // a browse URL to one file (…/blob/main/skills/x/SKILL.md) opens the repository, as the page does
+  const root = launcher ? await fs.mkdtemp(path.join((await import('node:os')).tmpdir(), 'saut-launcher-'))
+    : repo && !(await isDir(path.resolve(opts._[0]))) ? repo.root : path.resolve(opts._[0]);
+  if (!(await isDir(root))) { process.stderr.write(`saut studio <dir | repository url>: ${opts._[0]} is not a directory\n`); return 2; }
+  const h = await startStudio(root, { ...opts, repo, launcher });
+  // Ctrl-C: remove the repositories the page opened (and the launcher's empty root) first
+  const stop = () => { h.dispose(); if (launcher) fsSync.rmSync(root, { recursive: true, force: true }); };
+  process.once('exit', stop);
+  process.once('SIGINT', () => process.exit(130));
+  process.once('SIGTERM', () => process.exit(143));
   process.stdout.write(`${c.bold('SAUT Studio')} ${h.url}\n`);
-  process.stdout.write(c.dim(`  root ${rel(root)} · loopback only · the address carries a one-time key · Ctrl-C to stop\n`));
+  process.stdout.write(c.dim(`  ${launcher ? 'no folder — the page takes a git repository URL (saut studio <dir> opens a local folder)' : repo ? `remote ${repo.spec.url}${repo.spec.ref ? ` #${repo.spec.ref}` : ''} @ ${repo.commit.slice(0, 12)} — read-only` : `root ${rel(root)}`} · loopback only · the address carries a one-time key · Ctrl-C to stop\n`));
   await new Promise(() => undefined);          // serve until interrupted
   return 0;
 }

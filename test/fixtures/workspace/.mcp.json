@@ -1,0 +1,6 @@
+{ "mcpServers": {
+  "docs": { "command": "npx", "args": ["-y", "@acme/docs-mcp"] },
+  "pinned": { "command": "npx", "args": ["-y", "@acme/kb-mcp@1.4.2"] },
+  "remote": { "type": "http", "url": "http://mcp.example.com/sse" },
+  "local": { "type": "http", "url": "http://localhost:8080/mcp" }
+} }

@@ -1,0 +1,531 @@
+{
+  "$comment": "Where harnesses read a PROJECT's agent workspace from, beyond SKILL.md and agent .md: data, never code. kind: instructions (loaded into every session), command (a slash/prompt command), settings (permissions, hooks, MCP, env), mcp (MCP server config), hooks (hook config), manifest (plugin/extension manifest that wires the rest), code (executed by the harness). Patterns are POSIX globs relative to the scanned root; ** spans directories. Plugin manifests may point at more hook, MCP and code files — those are followed. Verified against the vendors' docs on verifiedAt; re-verify with the model catalogs.",
+  "verifiedAt": "2026-11-15",
+  "sources": [
+    "https://code.claude.com/docs/en/settings",
+    "https://code.claude.com/docs/en/hooks",
+    "https://code.claude.com/docs/en/mcp",
+    "https://code.claude.com/docs/en/memory",
+    "https://code.claude.com/docs/en/slash-commands",
+    "https://code.claude.com/docs/en/plugins-reference",
+    "https://code.claude.com/docs/en/claude-directory",
+    "https://learn.chatgpt.com/docs/agent-configuration/agents-md",
+    "https://learn.chatgpt.com/docs/config-file/config-reference",
+    "https://learn.chatgpt.com/docs/hooks",
+    "https://learn.chatgpt.com/docs/agent-configuration/rules",
+    "https://developers.openai.com/codex/plugins/build",
+    "https://code.visualstudio.com/docs/agents/reference/custom-instructions-reference",
+    "https://code.visualstudio.com/docs/copilot/customization/hooks",
+    "https://code.visualstudio.com/docs/agents/reference/mcp-configuration",
+    "https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-plugin-reference",
+    "https://code.visualstudio.com/docs/agents/reference/agent-plugin-reference",
+    "https://cursor.com/docs/context/rules",
+    "https://cursor.com/docs/context/mcp",
+    "https://cursor.com/docs/hooks",
+    "https://cursor.com/docs/cli/reference/permissions",
+    "https://cursor.com/docs/reference/plugins",
+    "https://opencode.ai/docs/config",
+    "https://opencode.ai/docs/mcp-servers",
+    "https://opencode.ai/docs/plugins",
+    "https://opencode.ai/docs/commands",
+    "https://geminicli.com/docs/reference/configuration",
+    "https://geminicli.com/docs/hooks",
+    "https://geminicli.com/docs/cli/custom-commands",
+    "https://geminicli.com/docs/extensions/reference",
+    "https://docs.cline.bot/customization/cline-rules",
+    "https://docs.devin.ai/desktop/cascade/memories",
+    "https://docs.devin.ai/desktop/cascade/hooks"
+  ],
+  "files": [
+    {
+      "pattern": "CLAUDE.md",
+      "kind": "instructions",
+      "format": "md",
+      "harness": "claude-code"
+    },
+    {
+      "pattern": "**/CLAUDE.md",
+      "kind": "instructions",
+      "format": "md",
+      "harness": "claude-code",
+      "note": "a nested CLAUDE.md loads when the agent works in that directory"
+    },
+    {
+      "pattern": "CLAUDE.local.md",
+      "kind": "instructions",
+      "format": "md",
+      "harness": "claude-code"
+    },
+    {
+      "pattern": ".claude/CLAUDE.md",
+      "kind": "instructions",
+      "format": "md",
+      "harness": "claude-code"
+    },
+    {
+      "pattern": ".claude/rules/**/*.md",
+      "kind": "instructions",
+      "format": "md",
+      "harness": "claude-code"
+    },
+    {
+      "pattern": ".claude/output-styles/*.md",
+      "kind": "instructions",
+      "format": "md",
+      "harness": "claude-code",
+      "note": "an output style replaces part of the system prompt when selected"
+    },
+    {
+      "pattern": ".claude/settings.json",
+      "kind": "settings",
+      "format": "json",
+      "harness": "claude-code",
+      "note": "Copilot and Cursor read its hooks too"
+    },
+    {
+      "pattern": ".claude/settings.local.json",
+      "kind": "settings",
+      "format": "json",
+      "harness": "claude-code"
+    },
+    {
+      "pattern": ".mcp.json",
+      "kind": "mcp",
+      "format": "json",
+      "harness": "claude-code",
+      "note": "also the portable MCP file for Copilot"
+    },
+    {
+      "pattern": ".claude/commands/**/*.md",
+      "kind": "command",
+      "format": "md",
+      "harness": "claude-code"
+    },
+    {
+      "pattern": ".claude/workflows/**/*.{js,mjs,ts}",
+      "kind": "code",
+      "format": "code",
+      "harness": "claude-code"
+    },
+    {
+      "pattern": ".claude-plugin/plugin.json",
+      "kind": "manifest",
+      "format": "json",
+      "harness": "claude-code"
+    },
+    {
+      "pattern": ".claude-plugin/marketplace.json",
+      "kind": "manifest",
+      "format": "json",
+      "harness": "claude-code"
+    },
+    {
+      "pattern": "hooks/hooks.json",
+      "kind": "hooks",
+      "format": "json",
+      "harness": "claude-code",
+      "note": "a plugin's default hook file (Claude Code, Codex, Copilot, Cursor, Gemini)"
+    },
+    {
+      "pattern": ".lsp.json",
+      "kind": "hooks",
+      "format": "json",
+      "harness": "claude-code",
+      "note": "a plugin's LSP servers: commands it starts"
+    },
+    {
+      "pattern": "monitors/monitors.json",
+      "kind": "hooks",
+      "format": "json",
+      "harness": "claude-code",
+      "note": "a plugin's monitors: commands it runs"
+    },
+    {
+      "pattern": "AGENTS.md",
+      "kind": "instructions",
+      "format": "md",
+      "harness": "codex",
+      "note": "also read by Copilot, Cursor, Cline, Devin and by Claude Code when no CLAUDE.md exists"
+    },
+    {
+      "pattern": "**/AGENTS.md",
+      "kind": "instructions",
+      "format": "md",
+      "harness": "codex"
+    },
+    {
+      "pattern": "AGENTS.override.md",
+      "kind": "instructions",
+      "format": "md",
+      "harness": "codex"
+    },
+    {
+      "pattern": "**/AGENTS.override.md",
+      "kind": "instructions",
+      "format": "md",
+      "harness": "codex"
+    },
+    {
+      "pattern": "AGENTS.local.md",
+      "kind": "instructions",
+      "format": "md",
+      "harness": "devin"
+    },
+    {
+      "pattern": "AGENT.md",
+      "kind": "instructions",
+      "format": "md",
+      "harness": "devin"
+    },
+    {
+      "pattern": ".codex/config.toml",
+      "kind": "settings",
+      "format": "toml",
+      "harness": "codex",
+      "note": "loaded for trusted projects only"
+    },
+    {
+      "pattern": ".codex/hooks.json",
+      "kind": "hooks",
+      "format": "json",
+      "harness": "codex"
+    },
+    {
+      "pattern": ".codex/rules/*.rules",
+      "kind": "settings",
+      "format": "rules",
+      "harness": "codex",
+      "note": "prefix_rule(..., decision=\"allow\") runs a command outside the sandbox"
+    },
+    {
+      "pattern": ".codex-plugin/plugin.json",
+      "kind": "manifest",
+      "format": "json",
+      "harness": "codex"
+    },
+    {
+      "pattern": ".agents/plugins/marketplace.json",
+      "kind": "manifest",
+      "format": "json",
+      "harness": "codex"
+    },
+    {
+      "pattern": "mcp.json",
+      "kind": "mcp",
+      "format": "json",
+      "harness": "codex",
+      "note": "a plugin's MCP servers (Codex, Cursor)"
+    },
+    {
+      "pattern": ".github/copilot-instructions.md",
+      "kind": "instructions",
+      "format": "md",
+      "harness": "copilot"
+    },
+    {
+      "pattern": ".github/instructions/**/*.instructions.md",
+      "kind": "instructions",
+      "format": "md",
+      "harness": "copilot"
+    },
+    {
+      "pattern": ".github/prompts/**/*.prompt.md",
+      "kind": "command",
+      "format": "md",
+      "harness": "copilot"
+    },
+    {
+      "pattern": ".github/hooks/*.json",
+      "kind": "hooks",
+      "format": "json",
+      "harness": "copilot"
+    },
+    {
+      "pattern": ".github/copilot/settings.json",
+      "kind": "settings",
+      "format": "json",
+      "harness": "copilot"
+    },
+    {
+      "pattern": ".github/copilot/settings.local.json",
+      "kind": "settings",
+      "format": "json",
+      "harness": "copilot"
+    },
+    {
+      "pattern": ".github/mcp.json",
+      "kind": "mcp",
+      "format": "json",
+      "harness": "copilot"
+    },
+    {
+      "pattern": ".vscode/mcp.json",
+      "kind": "mcp",
+      "format": "jsonc",
+      "harness": "copilot",
+      "note": "legacy (servers key)"
+    },
+    {
+      "pattern": ".github/plugin/plugin.json",
+      "kind": "manifest",
+      "format": "json",
+      "harness": "copilot"
+    },
+    {
+      "pattern": ".github/plugin/marketplace.json",
+      "kind": "manifest",
+      "format": "json",
+      "harness": "copilot"
+    },
+    {
+      "pattern": ".plugin/plugin.json",
+      "kind": "manifest",
+      "format": "json",
+      "harness": "other",
+      "note": "legacy OpenPlugin"
+    },
+    {
+      "pattern": ".cursorrules",
+      "kind": "instructions",
+      "format": "text",
+      "harness": "cursor",
+      "note": "legacy; Cline reads it too"
+    },
+    {
+      "pattern": ".cursor/rules/**/*.mdc",
+      "kind": "instructions",
+      "format": "md",
+      "harness": "cursor",
+      "note": "always-on only with alwaysApply: true"
+    },
+    {
+      "pattern": ".cursor/mcp.json",
+      "kind": "mcp",
+      "format": "json",
+      "harness": "cursor"
+    },
+    {
+      "pattern": ".cursor/hooks.json",
+      "kind": "hooks",
+      "format": "json",
+      "harness": "cursor"
+    },
+    {
+      "pattern": ".cursor/cli.json",
+      "kind": "settings",
+      "format": "json",
+      "harness": "cursor"
+    },
+    {
+      "pattern": ".cursor/commands/**/*.md",
+      "kind": "command",
+      "format": "md",
+      "harness": "cursor"
+    },
+    {
+      "pattern": "opencode.json",
+      "kind": "settings",
+      "format": "jsonc",
+      "harness": "opencode"
+    },
+    {
+      "pattern": "opencode.jsonc",
+      "kind": "settings",
+      "format": "jsonc",
+      "harness": "opencode"
+    },
+    {
+      "pattern": ".opencode/opencode.json",
+      "kind": "settings",
+      "format": "jsonc",
+      "harness": "opencode"
+    },
+    {
+      "pattern": ".opencode/opencode.jsonc",
+      "kind": "settings",
+      "format": "jsonc",
+      "harness": "opencode"
+    },
+    {
+      "pattern": ".opencode/commands/**/*.md",
+      "kind": "command",
+      "format": "md",
+      "harness": "opencode",
+      "note": "!`cmd` here runs without a permission check"
+    },
+    {
+      "pattern": ".opencode/command/**/*.md",
+      "kind": "command",
+      "format": "md",
+      "harness": "opencode",
+      "note": "legacy folder name"
+    },
+    {
+      "pattern": ".opencode/plugins/**/*.{js,mjs,cjs,ts}",
+      "kind": "code",
+      "format": "code",
+      "harness": "opencode",
+      "note": "run by OpenCode at start"
+    },
+    {
+      "pattern": ".opencode/plugin/**/*.{js,mjs,cjs,ts}",
+      "kind": "code",
+      "format": "code",
+      "harness": "opencode",
+      "note": "legacy folder name"
+    },
+    {
+      "pattern": "GEMINI.md",
+      "kind": "instructions",
+      "format": "md",
+      "harness": "gemini"
+    },
+    {
+      "pattern": "**/GEMINI.md",
+      "kind": "instructions",
+      "format": "md",
+      "harness": "gemini"
+    },
+    {
+      "pattern": ".gemini/settings.json",
+      "kind": "settings",
+      "format": "jsonc",
+      "harness": "gemini"
+    },
+    {
+      "pattern": ".gemini/.env",
+      "kind": "settings",
+      "format": "env",
+      "harness": "gemini",
+      "note": "environment for the project — a committed secret is exposed"
+    },
+    {
+      "pattern": ".gemini/commands/**/*.toml",
+      "kind": "command",
+      "format": "toml",
+      "harness": "gemini"
+    },
+    {
+      "pattern": "gemini-extension.json",
+      "kind": "manifest",
+      "format": "json",
+      "harness": "gemini"
+    },
+    {
+      "pattern": "commands/**/*.toml",
+      "kind": "command",
+      "format": "toml",
+      "harness": "gemini",
+      "note": "an extension's commands"
+    },
+    {
+      "pattern": "commands/**/*.md",
+      "kind": "command",
+      "format": "md",
+      "harness": "claude-code",
+      "note": "a plugin's commands"
+    },
+    {
+      "pattern": ".clinerules",
+      "kind": "instructions",
+      "format": "text",
+      "harness": "cline"
+    },
+    {
+      "pattern": ".clinerules/**/*.md",
+      "kind": "instructions",
+      "format": "md",
+      "harness": "cline"
+    },
+    {
+      "pattern": ".cline/rules/**/*.md",
+      "kind": "instructions",
+      "format": "md",
+      "harness": "cline"
+    },
+    {
+      "pattern": ".clinerules/hooks/*",
+      "kind": "code",
+      "format": "code",
+      "harness": "cline",
+      "note": "executable hook scripts (unconfirmed in vendor docs)"
+    },
+    {
+      "pattern": ".devin/rules/**/*.md",
+      "kind": "instructions",
+      "format": "md",
+      "harness": "devin"
+    },
+    {
+      "pattern": ".devin/global_rules.md",
+      "kind": "instructions",
+      "format": "md",
+      "harness": "devin"
+    },
+    {
+      "pattern": ".devin/hooks.v1.json",
+      "kind": "hooks",
+      "format": "json",
+      "harness": "devin"
+    },
+    {
+      "pattern": ".windsurfrules",
+      "kind": "instructions",
+      "format": "text",
+      "harness": "devin",
+      "note": "legacy Windsurf"
+    },
+    {
+      "pattern": ".windsurf/rules/**/*.md",
+      "kind": "instructions",
+      "format": "md",
+      "harness": "devin",
+      "note": "legacy Windsurf"
+    },
+    {
+      "pattern": ".windsurf/global_rules.md",
+      "kind": "instructions",
+      "format": "md",
+      "harness": "devin",
+      "note": "legacy Windsurf"
+    },
+    {
+      "pattern": ".windsurf/hooks.json",
+      "kind": "hooks",
+      "format": "json",
+      "harness": "devin",
+      "note": "legacy Windsurf"
+    },
+    {
+      "pattern": ".*-plugin/plugin.json",
+      "kind": "manifest",
+      "format": "json",
+      "harness": "other",
+      "note": "the .<vendor>-plugin layout several harnesses share"
+    },
+    {
+      "pattern": ".*-plugin/marketplace.json",
+      "kind": "manifest",
+      "format": "json",
+      "harness": "other"
+    },
+    {
+      "pattern": "plugin.json",
+      "kind": "manifest",
+      "format": "json",
+      "harness": "other",
+      "note": "Agent Plugins 1.0 root manifest (VS Code, Copilot CLI, Codex, Cursor)"
+    },
+    {
+      "pattern": "hooks/*hooks*.json",
+      "kind": "hooks",
+      "format": "json",
+      "harness": "other",
+      "note": "hook files a manifest names"
+    }
+  ],
+  "limits": {
+    "codexProjectDocBytes": 32768,
+    "instructionsHeavyTokens": 4000
+  }
+}

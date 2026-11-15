@@ -4,36 +4,101 @@ Every rule cites its precedent: `S*` / `C*` / `T*` = findings of a 2026-08-24 pr
 a production TAUT pack; named sources = external research or harness documentation. Severity is
 the rule's default; a rule may downgrade when the evidence is weaker.
 
+**How severity is set.** *high* — exploitable as it stands, or broken: a secret in the file, code
+downloaded and run, approvals switched off, an injection-to-write chain (untrusted input plus a
+request to change files, with nothing restricting tools), a skill a strict loader drops.
+*medium* — a real risk that needs one more condition, or a feature that silently degrades.
+*low* — least-privilege and cost hygiene. *info* — worth knowing, nothing to fix. Privilege rules
+read the text for **evidence**: a missing allowlist on a skill that only reads and reports is
+hygiene (low); on one whose text asks to edit files or run a mutating command it is medium; add
+untrusted input and it is high. An explicit "changes nothing" / "report only" from the author
+counts as evidence of no intent to change.
+
+**Why this severity.** The presence of a key is a fact; the severity of a prose-reading rule is
+an estimate of intent, and the estimate can be wrong. So each such finding (`no-allowlist`,
+`model-invocable-writer`, `untrusted-content-rule`) carries its **evidence**: the line it took as
+a request to change things or as outside input, quoted, and what it looked for and did not find
+(the reason it is not higher). `lint` prints it under high and medium findings, the report and
+Studio under every one (Studio links each line), JSON as `evidence`, SARIF as related locations.
+Read the quoted line; if it does not say what the rule thinks, the severity is wrong — suppress
+with that reason.
+
+**Copies.** The same skill in several harness folders (`skills/x`, `.openclaw/skills/x`) or the
+same instruction text saved as `AGENTS.md`, `.clinerules` and `copilot-instructions.md` is
+reported once, with its copies listed; a finding in every copy is one finding. Findings stay on
+every file in JSON, SARIF and for suppressions.
+
 There is no score. Findings are findings; the `enforcement` line under each artifact says, per
 harness, what the declared allowlist actually is there — `restrict`, `grant`, `prose`,
 `dropped` or `n/a` — so a "read-only" that holds on prose alone is visible as such.
 
 ## Privileges
 
+`no-allowlist` and `model-invocable-writer` are documented here but counted as **security**
+everywhere — the Overview's Security column, the Security card, the Security section of an
+artifact's panel and the report: the full toolset is what an injection acts with.
+
 | rule | severity | fires when | precedent |
 |---|---|---|---|
-| `no-allowlist` | high (skill) / medium (agent) | no `allowed-tools` (skill) or `tools:` (agent) — the full toolset is available | S1 |
-| `model-invocable-writer` | high | `disable-model-invocation` is not `true` and the skill has no allowlist, can mutate (Write/Edit/bare Bash/writing MCP tools), or drives an expensive runtime | S2, S10 |
-| `supervised-but-auto` | high | the body demands supervision ("SUPERVISED, always", "never unattended") but the model may invoke the skill | S2 |
+| `no-allowlist` | high / medium / low | no `allowed-tools` (skill) or `tools:` (agent) — the full toolset is available. high: the text asks to edit files or run a mutating command *and* reads untrusted content; medium: it asks to change things; low: it only reads and reports. When such a skill may also be started by the model, the message says so and the mechanical fix sets `disable-model-invocation: true` — one finding, not two | S1 |
+| `model-invocable-writer` | high / medium | `disable-model-invocation` is not `true` and the allowlist grants mutators (Write/Edit/bare Bash/writing MCP tools), or the skill drives an expensive runtime. high when it also reads untrusted content. With no allowlist at all, `no-allowlist` carries this | S2, S10 |
+| `supervised-but-auto` | medium | the body demands supervision ("SUPERVISED, always", "never unattended") but the model may invoke the skill | S2 |
 | `unreachable` | high | `user-invocable: false` and `disable-model-invocation: true` | — |
-| `dead-privilege` | medium | a granted tool the body or description never evidences (an MCP name, the server or the tool's first word, a catalog role word such as "the tracker MCP", a templated `mcp__<serverKey>__…` or "the tools listed in the frontmatter"; a builtin via prose evidence — shell commands, or running build/test commands, verification, a suite, a test/build check or gates, for Bash, "spawn the subagent" for Agent…). Read/Glob/Grep/Skill/AskUserQuestion are ambient and never dead; scoped rules (`Bash(git diff *)`) are deliberate and skipped | S4 |
-| `body-tool-not-allowed` | high (MCP) / medium (builtin) | the body cites a tool (`mcp__…`, or a backticked builtin that is not banned — "No `AskUserQuestion`", "you do not need to invoke it through `Skill`") the allowlist does not carry — the harness will lack it or prompt: silent degradation | C1 |
-| `unknown-tool` | high | an allowlist name that is neither a builtin of the harness nor `mcp__…` — a dead name grants nothing | — |
+| `dead-privilege` | low | a granted tool the body or description never evidences (an MCP name, the server or the tool's first word, a catalog role word such as "the tracker MCP", a templated `mcp__<serverKey>__…` or "the tools listed in the frontmatter"; a builtin via prose evidence — shell commands, or running build/test commands, verification, a suite, a test/build check or gates, for Bash, "spawn the subagent" for Agent…). Read/Glob/Grep/Skill/AskUserQuestion are ambient and never dead; scoped rules (`Bash(git diff *)`) are deliberate and skipped | S4 |
+| `body-tool-not-allowed` | medium (MCP) / low (builtin) | the body cites a tool (`mcp__…`, or a backticked builtin that is not banned — "No `AskUserQuestion`", "you do not need to invoke it through `Skill`") the allowlist does not carry — the harness will lack it or prompt: silent degradation | C1 |
+| `unknown-tool` | medium | an allowlist name that is neither a builtin of the harness nor `mcp__…` — a dead name grants nothing | — |
 | `legacy-tool` | info | a builtin name from older harness versions (`MultiEdit`, `LS`, …) | — |
-| `unknown-mcp-server` / `unknown-mcp-tool` | high | `mcp__server__tool` where the catalog lists no such server / no such tool for it (only when a catalog is present) | C1 |
+| `unknown-mcp-server` / `unknown-mcp-tool` | medium | `mcp__server__tool` where the catalog lists no such server / no such tool for it (only when a catalog is present) | C1 |
 | `readonly-claim-vs-writes` | medium | the description or body claims read-only, but Write/Edit/writing MCP tools are granted (or nothing is restricted). A claim is about the artifact: a description phrase, a body paragraph or list item that opens with "Read-only", or "this skill/agent never writes" — not a scoped "tracker access is read-only", a mid-sentence parenthetical "(read-only), …", "the read-only state of …" or a hard-wrapped line that starts with the word | C3 |
 | `bash-unscoped-readonly` | medium | claims read-only but grants bare `Bash`/`PowerShell` where the harness supports `Tool(spec)` scoping | S7 |
-| `readonly-not-enforced` | high / medium | claims read-only; on a *grant* harness (Claude Code) no `disallowed-tools` backs it — `allowed-tools` only pre-approves; on *prose*/*dropped* harnesses the promise is informational | Claude Code docs, S7 |
-| `agent-writes-via-bash` | medium | an agent described as writing a file has `Bash` but no `Write`/`Edit` — Bash is a superset of Write | S3 |
+| `readonly-not-enforced` | medium / low | claims read-only; on a *grant* harness (Claude Code) no `disallowed-tools` backs it — `allowed-tools` only pre-approves; on *prose*/*dropped* harnesses the promise is informational | Claude Code docs, S7 |
+| `agent-writes-via-bash` | low | an agent described as writing a file has `Bash` but no `Write`/`Edit` — Bash is a superset of Write | S3 |
 
 ## Safety
 
 | rule | severity | fires when | precedent |
 |---|---|---|---|
 | `dynamic-context` | high (bare Bash) / medium | the body contains `` !`cmd` `` dynamic context — executed before the model sees anything | Reversec "Skill Issues", Datadog 2026 |
-| `untrusted-content-rule` | medium | the artifact pulls external content (tracker, web, attachments, docs MCP) and never states that such content is data, not instructions ("treat as data", "is data, not …", "never instructions", "they never instruct you", "untrusted" all count) | S5 |
-| `injection-heuristic` | medium | "ignore previous instructions", invisible/bidi Unicode, download-and-execute pipelines, credential-file reads | Snyk ToxicSkills |
-| `secret-pattern` | high | a secret-shaped value (API keys, PATs, private keys, `password = "…"`) | pack `scan-secrets` |
+| `untrusted-content-rule` | medium / low | medium when the artifact can change things, low when it only reads. The artifact pulls external content (tracker, web, attachments, docs MCP, fetched pages — a link shown to the reader does not count) and never states that such content is data, not instructions ("treat as data", "is data, not …", "never instructions", "they never instruct you", "untrusted" all count) | S5 |
+| `injection-heuristic` | high / medium | high: invisible/bidi Unicode, download-and-execute pipelines; medium: "ignore previous instructions", credential-file reads. Also in instruction files and commands | Snyk ToxicSkills |
+| `secret-pattern` | high | a secret-shaped value (API keys, PATs, private keys, `password = "…"`) — in a skill, an agent, or any workspace file | pack `scan-secrets` |
+
+## Agent workspace
+
+Everything else a harness loads or runs from the project, found by the locations in
+`lib/workspace.json` (data, with sources): instruction files (`CLAUDE.md`, `AGENTS.md`,
+`GEMINI.md`, `.github/copilot-instructions.md`, `.cursor/rules/*.mdc`, `.clinerules`,
+`.devin/rules`, …), commands (`.claude/commands`, `.opencode/commands`, Gemini `*.toml`,
+Copilot prompts), settings (`.claude/settings*.json`, `.codex/config.toml`, `.codex/rules`,
+`opencode.json`, `.gemini/settings.json`, `.cursor/cli.json`), MCP files (`.mcp.json`,
+`.cursor/mcp.json`, `.vscode/mcp.json`, `mcp.json`), hook files (Claude, Codex, Copilot, Cursor,
+Gemini, Devin shapes), plugin manifests (`.claude-plugin`, `.codex-plugin`, `.github/plugin`,
+`plugin.json`, `gemini-extension.json`, `.<vendor>-plugin`) and the code they run. Manifests
+are followed to the hook, MCP and module files they wire in; hooks to the scripts they run;
+scripts to the local modules they require or spawn. Code is read, never executed. Disable with
+`--no-workspace`.
+
+| rule | severity | fires when | precedent |
+|---|---|---|---|
+| `remote-code` | high | a hook, MCP command or executed script downloads code and runs it (`curl … \| sh`) | supply chain |
+| `unpinned-package` | medium | `npx`/`bunx`/`pnpm dlx`/`uvx`/`pipx run` without an exact version, or a docker image without a tag or digest, in a hook, an MCP server or executed code | supply chain |
+| `insecure-url` | high | an MCP server or an http hook on plain `http://` (not localhost) | — |
+| `exec-network` | medium | code run by a hook, plugin or module can reach the network; the message says when it also receives the prompt or tool input | — |
+| `exec-credentials` | medium | that code reads credential files or token-like environment variables | — |
+| `exec-dynamic-code` | medium | that code runs `eval` / `new Function` / `vm.run*` on a computed string (a literal is readable and does not count) | — |
+| `exec-background` | low | that code starts a detached process that outlives the hook | — |
+| `permissions-bypass` | high / medium / low | committed settings that switch approvals off: Codex `danger-full-access` (high) and `approval_policy = "never"`; Claude `defaultMode` `bypassPermissions` (medium — Claude Code 2.1.257+ ignores it in project settings, older clients and importing harnesses do not), `auto`, `acceptEdits`, `sandbox.autoAllowBashIfSandboxed` (low); Gemini `defaultApprovalMode`; OpenCode `permission` allow | vendor docs |
+| `permissions-broad-allow` | medium (high for a Codex rule that allows an interpreter) | an allow rule for bare `Bash`/`PowerShell`/`Shell`/`run_shell_command`, OpenCode `permissions` allowing shell/edit/`*`, or a Codex `prefix_rule(…, decision="allow")` | vendor docs |
+| `mcp-auto-approve` | medium | `enableAllProjectMcpServers: true`, or a Gemini MCP server with `trust: true` | vendor docs |
+| `outbound-option` | low | a plugin `userConfig` option that names an address data is sent to (a webhook URL) | — |
+| `missing-file` | medium | a manifest or hook names a file that is not in the repository (install-time placeholders such as `PLUGIN_DIR/hooks/x.js` resolve to the file in the repository) | — |
+| `config-syntax` | medium | a settings, hooks, MCP or command file does not parse | — |
+| `instructions-over-limit` | medium | `AGENTS.md` over Codex's 32 KiB `project_doc_max_bytes` | Codex docs |
+| `instructions-heavy` | low | an always-on instruction file over about 4,000 tokens | — |
+| `instructions-import-outside` | low | `CLAUDE.md` imports `@~/…` or `@/…` from outside the repository | — |
+
+`dynamic-context`, `injection-heuristic` and `secret-pattern` also apply to commands and
+instruction files (Gemini `!{…}` is dynamic context too).
 
 ## Hygiene and cost
 
@@ -70,8 +135,8 @@ before and after · **D** a hardening the artifact does not use yet.
 | `body-over-spec` | A | medium | a SKILL.md body over 500 lines | Agent Skills best practices |
 | `aggressive-imperative` | B | low | an undertrigger-era instruction ("use PROACTIVELY", "unprompted", "if in doubt, use") or ≥ 5 all-caps imperatives at ≥ 3 per 1,000 words of prose (thresholds calibrated on one production pack) | Claude prompting best practices, prompt audit; GPT-6 prompting guide |
 | `incident-fossil` | B | low | two or more dated incident/measurement stories in the body | prompt audit |
-| `reasoning-echo` | B | low | asks the model to show its reasoning process or chain of thought (a verdict with its justification is fine) | prompting Claude Opus 5.5 |
-| `codex-agent-sandbox` | D | info | a read-only agent whose tools list Codex drops, with no read-only sandbox declared (TAUT: `manifest.agentSandbox`) | Codex subagents, permissions |
+| `reasoning-echo` | B | low | asks the model to show its reasoning process or chain of thought (a verdict with its justification is fine) | prompting Claude Fable 5.2, Opus 5.5, Sonnet 5.5 |
+| `codex-agent-sandbox` | D | info | a read-only agent whose tools list Codex drops; a `sandbox_mode` in the agent file (TAUT: `manifest.agentSandbox`) no longer silences it — Codex agents inherit the parent session's sandbox | Codex subagents, permissions |
 
 In a TAUT pack the deployment's `modelTiers` ladder is checked too, anchored to the line in
 `deployment.json`. Fenced code is not prose: commands and examples do not count toward the

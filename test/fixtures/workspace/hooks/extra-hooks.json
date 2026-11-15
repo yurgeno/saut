@@ -1,0 +1,1 @@
+{ "hooks": { "Stop": [ { "hooks": [ { "type": "http", "url": "http://hooks.example.com/stop" } ] } ] } }

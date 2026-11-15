@@ -40,17 +40,27 @@ test('Claude Code models: aliases, dated ids, previous models, effort per model'
   const prev = judgeModel(cc, 'claude-opus-4-7', null, null);
   assert.equal(prev[0].autofixModel, 'opus');
   assert.deepEqual(codes(judgeModel(cc, 'claude-opus-9', null, null)), ['model-unknown']);
+  assert.deepEqual(codes(judgeModel(cc, 'fable', 'max', null)), [], 'fable is Fable 5.2');
+  assert.deepEqual(codes(judgeModel(cc, 'claude-fable-5-2', 'xhigh', null)), []);
+  const fable51 = judgeModel(cc, 'claude-fable-5-1', null, null);
+  assert.deepEqual(codes(fable51), ['model-previous']);
+  assert.equal(fable51[0].autofixModel, 'fable');
 });
 
-test('Codex models: the 2026-09-23 precedents — gpt-5.6 does not run, 5.6 luna/terra move to GPT-6', () => {
+test('Codex models: gpt-5.6 does not run, the 5.6 family and gpt-6-sol move to GPT-6.1 (2026-11-15)', () => {
   const broken = judgeModel(cx, 'gpt-5.6', 'high', null);
   assert.deepEqual(codes(broken), ['model-unsupported'], 'an unsupported model is not also judged on effort');
   assert.equal(broken[0].severity, 'high');
-  assert.equal(broken[0].autofixModel, 'gpt-6-sol');
-  assert.equal(judgeModel(cx, 'gpt-5.6-terra', 'medium', null)[0].autofixModel, 'gpt-6-sol');
+  assert.equal(broken[0].autofixModel, 'gpt-6.1-sol');
+  assert.equal(judgeModel(cx, 'gpt-5.6-terra', 'medium', null)[0].autofixModel, 'gpt-6.1-terra');
+  assert.deepEqual(codes(judgeModel(cx, 'gpt-5.5', null, null)), ['model-unsupported'], 'retired from Codex 2026-10-14');
+  const sol = judgeModel(cx, 'gpt-6-sol', 'ultra', null);
+  assert.deepEqual(codes(sol), ['model-previous']);
+  assert.equal(sol[0].autofixModel, 'gpt-6.1-sol');
   assert.deepEqual(codes(judgeModel(cx, 'gpt-5.4-mini', null, null)), ['model-unsupported'], 'retired');
   assert.deepEqual(codes(judgeModel(cx, 'gpt-6-luna', 'ultra', null)), ['effort-unsupported'], 'luna stops at max');
-  assert.deepEqual(codes(judgeModel(cx, 'gpt-6-sol', 'ultra', null)), []);
+  assert.deepEqual(codes(judgeModel(cx, 'gpt-6.1-sol', 'ultra', null)), []);
+  assert.deepEqual(codes(judgeModel(cx, 'gpt-6.1-terra', 'ultra', null)), []);
 });
 
 test('the local Codex catalog is fresher evidence than the registry', async () => {
@@ -62,13 +72,13 @@ test('the local Codex catalog is fresher evidence than the registry', async () =
       fetched_at: '2026-12-01T00:00:00Z', client_version: '0.200.0',
       models: [
         { slug: 'gpt-7-nova', visibility: 'list', supported_reasoning_levels: [{ effort: 'low' }, { effort: 'turbo' }] },
-        { slug: 'gpt-6-sol', visibility: 'list', supported_reasoning_levels: [{ effort: 'low' }], upgrade: 'gpt-7-nova' },
+        { slug: 'gpt-6.1-sol', visibility: 'list', supported_reasoning_levels: [{ effort: 'low' }], upgrade: 'gpt-7-nova' },
       ],
     }));
     const local = await localCatalog(cx);
     assert.equal(local.fetchedAt, '2026-12-01');
     assert.deepEqual(codes(judgeModel(cx, 'gpt-7-nova', 'turbo', local)), [], 'a model and a level only the machine knows are accepted');
-    assert.deepEqual(codes(judgeModel(cx, 'gpt-6-sol', 'high', local)), ['effort-unsupported'], 'the local effort list wins');
+    assert.deepEqual(codes(judgeModel(cx, 'gpt-6.1-sol', 'high', local)), ['effort-unsupported'], 'the local effort list wins');
     const unknown = judgeModel(cx, 'gpt-8', null, local);
     assert.match(unknown[0].message, /nor in the local OpenAI Codex CLI catalog \(fetched 2026-12-01\)/);
   } finally { process.env.CODEX_HOME = old; await fs.rm(home, { recursive: true, force: true }); }
@@ -120,15 +130,19 @@ test('frontmatter model/effort, body length, and the Codex sandbox hint', () => 
   assert.deepEqual(long.map((x) => [x.code, x.guidance.class]), [['body-over-spec', 'A']]);
   const agent = art({ kind: 'agent', name: 'reader', tools: [{ raw: 'Read', base: 'Read', spec: null, mcp: null }], description: 'Read-only reviewer; never writes.', body: 'Review.' });
   assert.deepEqual(g(agent).map((x) => [x.code, x.guidance.class]), [['codex-agent-sandbox', 'D']]);
-  assert.equal(g(agent, { sandboxed: new Set(['reader']) }).length, 0, 'already sandboxed by the deployment');
+  const boxed = g(agent, { sandboxed: new Set(['reader']) });
+  assert.deepEqual(boxed.map((x) => x.code), ['codex-agent-sandbox'], 'a per-agent sandbox_mode does not hold on Codex');
+  assert.match(boxed[0].message, /ignores `sandbox_mode`/);
   assert.equal(g({ ...agent, tools: [{ raw: 'Write', base: 'Write', spec: null, mcp: null }] }).length, 0, 'a writer is not read-only');
 });
 
 test('guidance freshness: stale past maxAgeDays; `saut guidance --json` reports it and the machine', async () => {
-  const fresh = guidanceStatus([cc, cx], new Date('2026-09-25T00:00:00Z'));
+  const asOf = guidanceStatus([cc, cx], new Date()).parts.map((p) => p.verifiedAt).sort().at(-1);
+  const dayAfter = (n) => new Date(Date.parse(asOf + 'T00:00:00Z') + n * 86400000);
+  const fresh = guidanceStatus([cc, cx], dayAfter(1));
   assert.equal(fresh.stale, false);
   assert.equal(fresh.maxAgeDays, 60);
-  const later = guidanceStatus([cc, cx], new Date('2027-01-01T00:00:00Z'));
+  const later = guidanceStatus([cc, cx], dayAfter(61));
   assert.equal(later.stale, true);
   assert.ok(later.parts.every((p) => p.stale));
   const r = await saut(['guidance', '--json']);

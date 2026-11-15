@@ -113,8 +113,9 @@ test('the served page reaches every read route with its own api()', async () => 
   const html = await (await getPage()).text();
   const token = html.match(/<meta name="saut-token" content="([0-9a-f]+)">/)[1];
   const js = await (await getNoToken('/studio.js')).text();
-  const src = js.match(/async function api\(path, body\) \{[\s\S]*?\n\}/)[0];
-  const api = new Function('fetch', 'TOKEN', `${src}\nreturn api;`)((p, init) => fetch(base + p, init), token);
+  const src = js.match(/async function api\(path, body, home\) \{[\s\S]*?\n\}/)[0];
+  // ws: no remote repository open — the page talks to its own Studio
+  const api = new Function('fetch', 'TOKEN', 'ws', 'session', `${src}\nreturn api;`)((p, init) => fetch(base + p, init), token, null, { set() {} });
   const ctx = await api('/api/context');
   assert.ok(ctx.artifacts.some((a) => a.name === 'fx-clean'), 'the page loads its context');
   const pass = await api('/api/artifact?path=' + encodeURIComponent('skills/fx-clean/SKILL.md'));

@@ -8,10 +8,12 @@ const opts = { _: [], catalog: CATALOG };
 let diags;
 test.before(async () => { ({ diagnostics: diags } = await runLint([PACK], opts)); });
 
-test('S1: a skill without allowed-tools is a high finding (and read-only is not enforced)', () => {
-  const c = codes(diags, 'fx-noallow/SKILL.md');
-  assert.ok(c.includes('no-allowlist'));
-  assert.ok(c.includes('model-invocable-writer'));
+test('S1: a skill without allowed-tools — its severity follows what the text asks for (and read-only is not enforced)', () => {
+  const ds = diags.filter((x) => x.path.endsWith('fx-noallow/SKILL.md'));
+  const c = ds.map((x) => x.code);
+  // "Read-only: this skill NEVER writes" — the missing allowlist is hygiene; the open promise is the finding
+  assert.equal(ds.find((x) => x.code === 'no-allowlist').severity, 'low');
+  assert.ok(!c.includes('model-invocable-writer'), 'nothing in the text asks to change anything');
   assert.ok(c.includes('readonly-not-enforced'));
 });
 
@@ -47,8 +49,8 @@ test('C3/S7: read-only claim vs Write grant, bare Bash on a read-only role, gran
   assert.ok(c.includes('readonly-claim-vs-writes'));
   assert.ok(c.includes('bash-unscoped-readonly'));
   const ro = ds.filter((x) => x.code === 'readonly-not-enforced');
-  assert.ok(ro.some((x) => x.severity === 'high' && x.harness === 'claude-code'));
-  assert.ok(ro.some((x) => x.severity === 'medium' && x.harness.includes('codex')));
+  assert.ok(ro.some((x) => x.severity === 'medium' && x.harness === 'claude-code'));
+  assert.ok(ro.some((x) => x.severity === 'low' && x.harness.includes('codex')));
 });
 
 test('dynamic context with bare Bash, untrusted-content rule, secret pattern', () => {

@@ -18,15 +18,31 @@
     <button class="view-btn" data-view="bench">Bench</button>
     <button class="view-btn" data-view="harnesses">Harnesses</button>
   </nav>
+  <form class="repo-form" id="repoForm" hidden>
+    <input type="text" id="repoUrl" placeholder="git repository URL — https://github.com/owner/repo" spellcheck="false" autocomplete="off" aria-label="Git repository URL">
+    <button class="btn primary" type="submit" id="repoOpen">Scan</button>
+  </form>
   <div class="targets" id="targets" title="Target harnesses — the matrix, the findings and the bench follow this choice"></div>
 </header>
+<div id="remoteBar" class="remote-bar" hidden></div>
 <div id="guidanceBar" class="guidance-bar"></div>
 
 <main>
   <!-- ── Overview ─────────────────────────────────────────────── -->
   <section id="view-overview" class="view">
+    <div class="card launcher" id="launcherCard" hidden>
+      <h2>Scan a git repository</h2>
+      <p class="muted">Paste a repository URL. SAUT fetches one commit read-only, scans every skill and agent in it, and shows the result right here — the same overview, findings and costs, nothing can be changed or run there. The fetched copy is removed when you stop the Studio.</p>
+      <form id="launcherForm" class="launcher-form">
+        <input type="text" id="launcherUrl" placeholder="https://github.com/owner/repo" spellcheck="false" autocomplete="off" aria-label="Git repository URL">
+        <button class="btn primary" type="submit" id="launcherOpen">Scan repository</button>
+      </form>
+      <div class="legend">Also: <code>git@host:owner/repo</code>, <code>ssh://…</code>, a browse URL like <code>…/tree/main/skills/review</code>, or <code>&lt;url&gt;#&lt;ref&gt;:&lt;path&gt;</code>. Private repositories use your git credentials. To open a local folder: <code>saut studio &lt;dir&gt;</code>.</div>
+      <div id="launcherStatus" class="legend" role="status"></div>
+    </div>
     <div class="summary-cards" id="summaryCards"></div>
     <div class="card" id="securityCard"></div>
+    <div class="card" id="workspaceCard" hidden></div>
     <div class="toolbar">
       <input type="search" id="ovFilter" placeholder="Filter by name or description">
       <span id="codeFilterChip"></span>

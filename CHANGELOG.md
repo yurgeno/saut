@@ -3,6 +3,131 @@
 All notable changes to SAUT. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions are [semantic](https://semver.org/) and each release is tagged.
 
+## [Unreleased]
+
+## [0.8.0] — 2026-11-15
+
+### Added
+
+- **Remote targets.** `saut lint|cost|passport <git url>` scans a repository without a local
+  clone: `https://`, `ssh://`, `git@host:owner/repo` or `file://`, with `#<ref>` and
+  `:<path>`, and GitHub/GitLab browse URLs as copied. One commit is fetched read-only into a
+  temporary directory and removed after the run (`--keep`, `--timeout`). Untrusted by
+  construction: no submodules, hooks or `ext::`, symlinks as plain files, no credential
+  prompts, `http://`/`git://` refused; `--live`, `--fix`, `test` and `studio` refuse a remote
+  target. Paths read `host/owner/repo@<commit>/…`; JSON gains `sources`, SARIF
+  `versionControlProvenance`.
+  An https URL with a user part (`https://<token>@host/…`) is refused like a password, so a token
+  never reaches the output. Configuration from the repository is parsed defensively: a TOML key
+  that names the object prototype (`__proto__`, `constructor`, `prototype`) is a syntax error.
+- **Studio: scan a repository from the page.** `saut studio` with no argument opens a start
+  page that takes a git repository URL; a Studio over a folder has the same field in its
+  header. The repository is shown in the same tab (← Close and Back return); a read-only Studio
+  of its own serves it behind a relay (`x-saut-ws`), and its server refuses save, fix,
+  suppression, bench, agent review and validation. Close removes the fetched copy; the rest go
+  when the Studio stops. `saut studio <url>` opens one directly. Each Studio's session cookie now
+  carries its port.
+- **The agent workspace.** Hooks, MCP servers, settings and permissions, always-on instruction
+  files, commands, plugin manifests and the code they run are scanned alongside skills and agents,
+  for Claude Code, Codex, Copilot, Cursor, OpenCode, Gemini CLI, Cline and Devin/Windsurf (locations
+  as dated, sourced data in `lib/workspace.json`). Manifests are followed to the hook, MCP and
+  module files they wire in, hooks to their scripts, scripts to the local modules they load or
+  spawn; plugins in marketplace subfolders are scanned from their own root; install-time
+  placeholders (`PLUGIN_DIR/hooks/x.js`) resolve to the file in the repository. Nothing is
+  executed. New rules: `remote-code`, `unpinned-package`, `insecure-url`, `exec-network`,
+  `exec-credentials`, `exec-dynamic-code`, `exec-background`, `permissions-bypass`,
+  `permissions-broad-allow`, `mcp-auto-approve`, `outbound-option`, `missing-file`,
+  `config-syntax`, `instructions-over-limit`, `instructions-heavy`, `instructions-import-outside`;
+  `dynamic-context` (also Gemini `!{…}`), `injection-heuristic` and `secret-pattern` apply to
+  commands and instruction files. A small TOML reader (`lib/toml.mts`) keeps SAUT dependency-free.
+  `--no-workspace` skips it. The report and the Studio gain an Agent workspace section.
+  A workspace file can be named directly (`saut lint .claude/settings.json`); a file a manifest
+  wires in is scanned whatever order the folder walk finds it in.
+- **Copies count once.** One skill in several harness folders, or one instruction text saved for
+  several harnesses, is one unit with its copies listed; a finding every copy has is one finding
+  (lint text, report, Studio rows and totals). JSON, SARIF and suppressions still see every file.
+  Copies are the same kind and name in the same place once harness folders (`.openclaw/`,
+  `.claude/`…) are set aside; two plugins' skills that share a name stay two.
+- **Overview rule filter is rule × severity.** Each part of a Security-card split (`high 2 ·
+  medium 11 · low 26`) filters to those artifacts; the filter chip switches severity; each row
+  shows the rule's severity there.
+- **Why this severity.** Findings whose severity is read from prose (`no-allowlist`,
+  `model-invocable-writer`, `untrusted-content-rule`) carry `evidence`: the quoted line taken as a
+  request to change things or as outside input, and what was looked for and not found. Shown in
+  `lint` (high/medium), the report, Studio (each line links to the editor), JSON and SARIF
+  (related locations).
+- **`saut report <dir | url>`.** One complete document: source (repository, ref, commit),
+  verdict, totals, security at a glance, a per-artifact table with enforcement per harness and
+  cost, and every finding with its fix, guidance class and sources. Markdown to stdout;
+  `--out file.html` writes a self-contained page (light and dark), `--json` / `--format json`
+  the data. Exits as `lint`.
+
+### Changed (behaviour)
+
+- **One meaning of "security" on every screen.** `no-allowlist` and `model-invocable-writer` are
+  security findings (category `security`; still documented under Privileges): the Overview's
+  Security column, the Security card, an artifact's Security section and the report count the same
+  set. Before, the card listed them while the column and the panel filed them under Privileges.
+- **Severity calibrated rule by rule** (docs/RULES.md, "How severity is set"). Privilege rules read
+  evidence: `no-allowlist` is high only for untrusted input plus a request to change files, medium
+  for a request to change things, low for read-and-report skills (an author's "changes nothing"
+  counts). Untrusted input means the text reads a ticket, issue or page ("fetch it from the tracker"),
+  not that it writes tickets or names the tracker; lines that describe another skill ("- **`/x`** …")
+  and plural nouns ("scattered edits") are not requests; `model-invocable-writer` needs the skill to ask for changes or be granted mutators
+  (high only with untrusted input). Lowered: `supervised-but-auto`, `unknown-tool`,
+  `unknown-mcp-server`/`-tool`, MCP `body-tool-not-allowed` (medium); `dead-privilege`, builtin
+  `body-tool-not-allowed`, `agent-writes-via-bash` (low); `readonly-not-enforced` medium/low;
+  `untrusted-content-rule` low when the artifact cannot act. `injection-heuristic` is high for
+  invisible Unicode and download-and-execute. A bare link in the text is no longer "external
+  content". On the production TAUT pack: 16 high → 3.
+
+- `saut studio` without an argument no longer opens the current directory — use `saut studio .`.
+
+### Changed
+
+- **Claude Fable 5.2 in the Claude Code model catalog.** `fable` now resolves to
+  `claude-fable-5-2` (Claude Code 2.1.321; Fable 5 in Claude apps gateway sessions), current with
+  five effort levels, Claude Code default `medium`. `claude-fable-5-1` moves to previous with
+  `fable` as the replacement; `claude-mythos-5-2` (limited availability) is listed as current.
+  The provider note names what `opus`/`sonnet`/`haiku` resolve to on Bedrock, Foundry and Claude
+  Platform on AWS; `claude-sonnet-4-5` notes its API retirement on 2026-11-30.
+  `SubagentHandback` joins the built-in tools. Catalog re-verified 2026-11-15.
+- **GPT-6.1 in the Codex model catalog.** `gpt-6.1-sol` (the Codex default from codex-cli 0.161.0)
+  and `gpt-6.1-terra` (codex-cli 0.165.0) are current; `gpt-6-sol` moves to previous with
+  `gpt-6.1-sol` as the replacement; `gpt-5.6-terra` now points to `gpt-6.1-terra` and
+  `gpt-5.6-sol` to `gpt-6.1-sol`; `gpt-5.5` is retired (Codex, ChatGPT sign-in, 2026-10-14).
+  The skills doc moved to learn.chatgpt.com/docs/build-skills. Re-verified 2026-11-15.
+- **`codex-agent-sandbox` no longer accepts a per-agent sandbox.** The Codex subagents doc now
+  says `sandbox_mode`, `approval_policy`, `model_provider` and `mcp_servers` in a custom agent
+  file do not override the parent session. A TAUT `manifest.agentSandbox` entry no longer
+  silences the finding; the message says the sandbox there is ignored, and the fix points at
+  `features.shell_tool = false` or a read-only parent session. New degradation
+  `CX-AGENT-SANDBOX-INHERITED`.
+- **Guidance.** Every prompting rule re-verified 2026-11-15; `reasoning-echo` and
+  `aggressive-imperative` cite *Prompting Claude Fable 5.2*. Examples use `codex=gpt-6.1-sol`.
+  The freshness test no longer pins dates.
+
+Sources: [Fable 5.2 overview](https://platform.claude.com/docs/en/models/fable-5-2/overview),
+[Prompting Claude Fable 5.2](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-2),
+[Claude Code model configuration](https://code.claude.com/docs/en/model-config),
+[Claude Code changelog 2.1.294–2.1.325](https://code.claude.com/docs/en/changelog),
+[tools reference](https://code.claude.com/docs/en/tools-reference),
+[Codex models](https://learn.chatgpt.com/docs/models),
+[Codex subagents](https://learn.chatgpt.com/docs/agent-configuration/subagents),
+[OpenAI deprecations](https://developers.openai.com/api/docs/deprecations),
+[Using GPT-6](https://developers.openai.com/api/docs/guides/latest-model).
+
+[0.8.0]: https://github.com/yurgeno/saut/releases/tag/v0.8.0
+
+## [0.7.7] — 2026-10-22
+
+### Fixed
+
+- **`metadata.taut.maturity` is a wiring key the engine reads.** TAUT v0.8.0 marks draft skills
+  with it; the TAUT adapter no longer reports it as `taut-wiring-unknown-key`.
+
+[0.7.7]: https://github.com/yurgeno/saut/releases/tag/v0.7.7
+
 ## [0.7.6] — 2026-10-15
 
 ### Fixed

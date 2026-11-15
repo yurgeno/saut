@@ -1,0 +1,4 @@
+description = "Run the tests"
+prompt = """
+Run !{npm test} and summarise the failures.
+"""

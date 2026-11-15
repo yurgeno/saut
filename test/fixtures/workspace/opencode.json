@@ -1,0 +1,5 @@
+{
+  // OpenCode accepts comments
+  "mcp": { "servers": { "fs": { "type": "local", "command": ["npx", "-y", "fs-mcp"] } } },
+  "permission": { "bash": "allow" },
+}

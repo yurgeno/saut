@@ -1,9 +1,24 @@
 # The Studio — `saut studio`
 
 ```bash
+saut studio                      # the start page: enter a git repository URL
 saut studio .                    # a skill folder, a repo, a TAUT pack, or a compiled workspace
 saut studio ~/my-pack --port 7391 --deployment myproject
+saut studio https://github.com/o/r   # a remote repository, read-only
 ```
+
+**Remote repositories.** With no argument the Studio opens a start page with one field: a git
+repository URL (the forms `saut lint` takes — `https://`, `git@host:…`, `ssh://`, a GitHub or
+GitLab browse URL, `<url>#<ref>:<path>`). A Studio over a local folder has the same field in its
+header. **Scan** fetches one commit read-only (no submodules, no hooks, symlinks as plain files)
+and shows it in the same tab: the same Overview, findings, costs and source, with a bar naming
+the repository and commit and a **← Close** button (the browser's Back works too). Behind it a
+read-only Studio of its own serves that repository on another loopback port; the page never
+visits it — this Studio relays the page's calls to it, so it stays one page on one origin.
+Nothing there writes or runs — save, fixes, suppressions, the bench, agent review and pack
+validation are refused by the server, not only hidden; an installed content scanner may still run
+on it. Close removes the fetched copy; whatever is still open (at most four, the oldest goes
+first) is removed when the Studio stops. A reload keeps the open repository.
 
 A local page over the same library functions the CLI verbs call: nothing here re-implements a
 rule, a cost model or a runner. It opens on `127.0.0.1` with an ephemeral port and prints the
@@ -24,6 +39,16 @@ session — and one row per skill or agent: its high/medium/security counts, gui
 fixable findings, always-on and on-invoke tokens, and what its allowlist is on each target
 harness. Sort by any column, filter by name, kind or "only with findings"; a row opens the
 artifact. New skills and agents start here.
+
+Rows are per skill or agent: copies of one skill in several harness folders are one row with a
+**N copies** pill (hover for the paths), and a finding every copy has is counted once.
+
+The **Agent workspace** card lists the hooks, MCP servers, settings, instruction files, commands,
+plugin manifests and executed code with findings — one block per file (identical instruction files
+merged), each finding with its line, what it means and how to fix it — and, folded, what is there:
+what loads into every session (with tokens), the hooks and helper commands the harness runs, the MCP
+servers, and the code behind them with what runs it and what it can do (network, processes,
+credentials, dynamic code). Its findings count in the totals.
 
 The **Security** card lists every security rule that fires — and the privilege rules that make
 an injection dangerous (no allowlist, a model-invocable writer, dynamic context) — with the

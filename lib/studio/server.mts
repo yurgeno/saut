@@ -8,7 +8,8 @@
 // plus an Origin check; no CORS headers are ever sent, so a foreign page can read nothing. A
 // DNS-rebinding guard pins the Host header to this loopback origin. Writes are contained под
 // the root the studio was started with, and only to a skill's SKILL.md or an agent .md.
-import { createServer } from 'node:http';
+import { copyKey, identity } from '../copies.mts';
+import { createServer, request as httpRequest } from 'node:http';
 import { execFile, spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
@@ -36,6 +37,7 @@ import { exists, onPath, readText } from '../util.mts';
 import { previews } from '../adapters/taut.mts';
 import { looksLikeAgentPath } from '../skill.mts';
 import { load, type Opts } from '../commands.mts';
+import { fetchRemote, isRemoteTarget, parseRemote, type Fetched } from '../remote.mts';
 
 const run = promisify(execFile);
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -67,19 +69,43 @@ function tokenOk(given: unknown, token: string): boolean {
 // not a command file, not a secret that happens to sit under the root.
 const isArtifactFile = (abs: string): boolean => path.basename(abs) === 'SKILL.md' || (abs.endsWith('.md') && looksLikeAgentPath(abs));
 
-const COOKIE = 'saut_studio';
-const cookieOf = (header: string | undefined): string | null => {
-  for (const part of (header ?? '').split(';')) { const [k, ...v] = part.trim().split('='); if (k === COOKIE) return v.join('='); }
+// Cookies are not port-scoped: two Studios on 127.0.0.1 (a remote repository opens its own)
+// would overwrite one another's session under one name — so the name carries the port.
+const cookieName = (port: number) => `saut_studio_${port}`;
+const cookieOf = (header: string | undefined, name: string): string | null => {
+  for (const part of (header ?? '').split(';')) { const [k, ...v] = part.trim().split('='); if (k === name) return v.join('='); }
   return null;
 };
 
+// A remote repository opened from the page: fetched read-only (remote.mts) and served by its
+// own READ-ONLY Studio on another ephemeral port, which the page never visits — this Studio
+// relays the page's /api calls to it (header x-saut-ws), so the page stays one tab, one origin.
+// Kept until the page closes it or the Studio that opened it stops;
+// the oldest goes when there are more than this many.
+const MAX_REMOTE = 4;
+const SEV_RANK: Record<string, number> = { high: 0, medium: 1, low: 2, info: 3 };
+// What a read-only Studio still answers by POST: lint an unsaved text in memory (nothing to
+// edit there, but harmless), emit frontmatter (pure), run an installed content scanner on it.
+const READ_ONLY_POST = new Set(['/api/emit', '/api/scan']);
+
 // url: the address to open — it carries a one-time launch key; the page itself is served only
 // to a browser that came through it (the key becomes an HttpOnly, SameSite=Strict cookie).
-export interface StudioHandle { server: Server; token: string; port: number; url: string; close: () => Promise<void> }
+export interface StudioHandle { server: Server; token: string; port: number; url: string; close: () => Promise<void>; dispose: () => void }
 
 interface BenchJob { id: string; events: { kind: string; text: string }[]; done: boolean; result?: BenchResult; runId?: string; pair?: { id: string; before: string; after: string }; error?: string; listeners: Set<(e: { kind: string; text: string } | null) => void> }
 
-export async function startStudio(root: string, opts: Opts & { port?: number }): Promise<StudioHandle> {
+// `remote`: the root is a fetched remote repository — untrusted content, so this Studio only
+// READS: no save, fix, suppression, bench, agent review or pack validation, and it opens no
+// further repositories. `dispose` removes what it owns synchronously (for a signal handler).
+// `launcher`: no root of its own (`saut studio` with no argument) — the page offers only the
+// repository form.
+export async function startStudio(root: string, studioOpts: Opts & { port?: number; repo?: Fetched; launcher?: boolean }): Promise<StudioHandle> {
+  const { repo, launcher = false, ...rest } = studioOpts;
+  const remote = repo ?? null;
+  let opts: Opts & { port?: number } = { ...rest, remote: undefined };
+  if (remote) opts = { ...opts, live: false };
+  const locked = !!remote || launcher;   // nothing local to change
+  const opened: { id: string; handle: StudioHandle; fetched: Fetched }[] = [];
   const token = crypto.randomBytes(16).toString('hex');
   // The page carries the API token, so the page itself is not for any local process that finds
   // the port: it is served only with the launch key (printed once) or the cookie it sets.
@@ -139,14 +165,17 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
   // TAUT context. Recomputed per request — a file edited in an IDE shows up on reload.
   async function context() {
     const { artifacts, harnesses, registry, taut, note } = await load([root], opts);
-    const locked = await lockMap();
+    const lockedFiles = await lockMap();
     const real = async (p: string) => fs.realpath(p).catch(() => p);
     return {
-      root: path.basename(root),
+      root: launcher ? '' : remote ? `${remote.spec.label}@${remote.commit.slice(0, 12)}${remote.spec.subpath ? '/' + remote.spec.subpath : ''}` : path.basename(root),
+      remote: remote ? { url: remote.spec.url, ref: remote.spec.ref, commit: remote.commit, path: remote.spec.subpath || null, label: remote.spec.label } : null,
       note: note === null ? null : scrub(note),
-      mode: taut ? 'taut' : locked.size ? 'compiled' : 'generic',
+      mode: launcher ? 'launcher' : taut ? 'taut' : lockedFiles.size ? 'compiled' : 'generic',
       // what this backend can do — the page shows or hides by these, never by guessing where it runs
-      capabilities: { write: true, fix: true, check: true, compose: true, bench: harnesses.some((h) => h.runner), validate: !!taut, history: true, suppress: true, scan: true, llmReview: await onPath('claude') },
+      capabilities: locked
+        ? { write: false, fix: false, check: false, compose: false, bench: false, validate: false, history: false, suppress: false, scan: true, llmReview: false, remote: launcher }
+        : { write: true, fix: true, check: true, compose: true, bench: harnesses.some((h) => h.runner), validate: !!taut, history: true, suppress: true, scan: true, llmReview: await onPath('claude'), remote: true },
       taut: taut ? { engineCommit: taut.engineCommit, deployment: taut.project?.name ?? null, projects: taut.projects.map((p) => p.name) } : null,
       harnesses: harnesses.map((h) => ({
         id: h.id, title: h.title, runner: !!h.runner, skillsDirs: h.skillsDirs, agentsDir: h.agentsDir, docs: h.docs,
@@ -157,7 +186,7 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
       tools: { builtin: registry.builtin, servers: registry.servers },
       benchDefaults: DEFAULT_MODEL,
       artifacts: await Promise.all(artifacts.map(async (a) => {
-        const c = locked.get(await real(a.path)) ?? null;
+        const c = lockedFiles.get(await real(a.path)) ?? null;
         return { kind: a.kind, name: a.name, path: relOf(a.path), description: a.description,
           compiled: c ? { source: c.source, pack: c.pack, commit: c.commit, harness: harnessFor(await real(a.path), c.lockDir, harnesses) } : null };
       })),
@@ -208,7 +237,8 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
     return {
       kind: a.kind, name: a.name, path: relOf(a.path),
       text: source, base: hashOf(source),
-      readOnly: lock ? `compiled from ${lock.pack ?? 'the pack'}: ${lock.source}${lock.commit ? ` @${lock.commit}` : ''} — edit the source and recompile` : null,
+      readOnly: remote ? `a remote repository (${remote.spec.label}@${remote.commit.slice(0, 12)}), opened for reading — clone it to edit`
+        : lock ? `compiled from ${lock.pack ?? 'the pack'}: ${lock.source}${lock.commit ? ` @${lock.commit}` : ''} — edit the source and recompile` : null,
       frontmatter: raw.data, duplicates: raw.duplicates, lines: raw.lines, bodyOffset: raw.bodyOffset,
       findings: sortDiags(explain(findings)).map((x) => ({ ...x, path: relOf(x.path) })), cost, over: overBudget(cost, a, {}), matrix: matrix(a, harnesses), compiled,
     };
@@ -227,14 +257,34 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
     for (const x of lint.diagnostics) byPath.set(x.path, [...(byPath.get(x.path) ?? []), x]);
     const cc = lint.harnesses.find((h) => h.id === 'claude-code') ?? null;
     const rows = new Map<string, any>();
+    // one skill in several folders is one row: a finding every copy has is counted once
+    const ident = identity;   // the same definition of "the same finding" as lint and report
+    const seenIds = new Map<string, Set<string>>();
     for (const a of lint.artifacts) {
       const ds = byPath.get(a.path) ?? [];
       const realPath = await fs.realpath(a.path).catch(() => a.path);
       const c = locked.get(realPath) ?? null;
-      const key = c ? `${a.kind}:${a.name}` : a.path;
+      const key = copyKey(a);
       const harness = c ? harnessFor(realPath, c.lockDir, lint.harnesses) : null;
       const prev = rows.get(key);
-      if (prev) { prev.copies.push({ path: relOf(a.path), harness }); continue; }
+      if (prev) {
+        if (!prev.copies.length) prev.copies.push({ path: prev.path, harness: null });
+        prev.copies.push({ path: relOf(a.path), harness });
+        if (!c) {
+          const ids = seenIds.get(key)!;
+          for (const x of ds.filter((y) => !y.suppressed && !ids.has(ident(y)))) {
+            ids.add(ident(x));
+            prev[x.severity] += 1;
+            if (x.autofix) prev.fixable += 1;
+            if (x.guidance) prev.guidance[x.guidance.class] += 1;
+            if (x.category === 'security' || x.category === 'scanner') prev.security += 1;
+            if (!prev.codes.includes(x.code)) prev.codes.push(x.code);
+            if ((SEV_RANK[x.severity] ?? 9) < (SEV_RANK[prev.sev[x.code]] ?? 9)) prev.sev[x.code] = x.severity;
+          }
+        }
+        continue;
+      }
+      seenIds.set(key, new Set(ds.filter((y) => !y.suppressed).map(ident)));
       const cost = await costOf(a, { harness: cc, exact: false, agentsByName: new Map(lint.artifacts.filter((x) => x.kind === 'agent').map((x) => [x.name, x])) as Map<string, Artifact> });
       const live = ds.filter((x) => !x.suppressed);
       const count = (s: string) => live.filter((x) => x.severity === s).length;
@@ -246,6 +296,8 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
         security: live.filter((x) => x.category === 'security' || x.category === 'scanner').length,
         suppressed: ds.length - live.length,
         codes: [...new Set(live.map((x) => x.code))],
+        // per rule, the worst severity it has here — what the Overview's rule × severity filter reads
+        sev: live.reduce((m: Record<string, string>, x) => ((SEV_RANK[x.severity] ?? 9) < (SEV_RANK[m[x.code]] ?? 9) ? { ...m, [x.code]: x.severity } : m), {}),
         alwaysOn: cost.alwaysOnTokens, invoke: cost.invokeTokens + (cost.transitive ?? []).reduce((n, t) => n + t.tokens, 0),
         enforcement: Object.fromEntries(matrix(a, lint.harnesses).map((m) => [m.harness, m.allowlist])),
         compiled: c ? { source: c.source, pack: c.pack, commit: c.commit } : null,
@@ -256,26 +308,40 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
     const sum = (k: string) => list.reduce((n, r) => n + r[k], 0);
     // Security at a glance: every security finding by rule, the artifacts it is in, and what
     // the content scanner said (or that none is installed).
-    const sec = new Map<string, { code: string; title: string; severity: string; artifacts: Set<string> }>();
+    // one line per rule, its artifacts split by severity — the worst case never speaks for all
+    const sec = new Map<string, { code: string; title: string; bySeverity: Map<string, Set<string>> }>();
     for (const x of lint.diagnostics) {
-      if (x.suppressed || !(x.category === 'security' || x.category === 'scanner' || x.code === 'no-allowlist' || x.code === 'model-invocable-writer' || x.code === 'dynamic-context')) continue;
+      if (x.suppressed || !(x.category === 'security' || x.category === 'scanner')) continue;
       const name = lint.artifacts.find((a) => a.path === x.path)?.name ?? relOf(x.path);
-      const e = sec.get(x.code) ?? { code: x.code, title: x.title ?? x.code, severity: x.severity, artifacts: new Set<string>() };
-      e.artifacts.add(name); sec.set(x.code, e);
+      const e = sec.get(x.code) ?? { code: x.code, title: x.title ?? x.code, bySeverity: new Map<string, Set<string>>() };
+      if (!e.bySeverity.has(x.severity)) e.bySeverity.set(x.severity, new Set());
+      e.bySeverity.get(x.severity)!.add(name); sec.set(x.code, e);
     }
     const { detectScanners, SCANNERS } = await import('../scan.mts');
     const installed = (await detectScanners()).map((x) => x.id);
-    const outside = lint.diagnostics.filter((x) => !x.suppressed && !lint.artifacts.some((a) => a.path === x.path)).map((x) => ({ ...x, path: relOf(x.path) }));
+    const surfaced = new Set(lint.surfaces.map((s) => s.path));
+    const outside = lint.diagnostics.filter((x) => !x.suppressed && !surfaced.has(x.path) && !lint.artifacts.some((a) => a.path === x.path)).map((x) => ({ ...x, path: relOf(x.path) }));
+    // the rest of the agent workspace: hooks, MCP, settings, instructions, commands, manifests, code
+    const { unitsOf } = await import('../copies.mts');
+    const { workspaceSection } = await import('../report.mts');
+    const { units } = unitsOf(lint.artifacts, lint.surfaces, lint.diagnostics, relOf);
+    const workspace = workspaceSection(lint.surfaces, units, relOf);
+    const wsLive = workspace.units.flatMap((u) => u.findings.filter((f) => !f.suppressed));
+    const ws = (s: string) => wsLive.filter((f) => f.severity === s).length;
     return {
       security: {
-        rules: [...sec.values()].map((e) => ({ ...e, artifacts: [...e.artifacts].sort() })).sort((a, b) => (a.severity === 'high' ? 0 : 1) - (b.severity === 'high' ? 0 : 1) || b.artifacts.length - a.artifacts.length),
+        rules: [...sec.values()].map((e) => {
+          const groups = [...e.bySeverity].sort((p, q) => SEV_RANK[p[0]] - SEV_RANK[q[0]]).map(([severity, s]) => ({ severity, artifacts: [...s].sort() }));
+          return { code: e.code, title: e.title, severity: groups[0].severity, groups, artifacts: groups.flatMap((g) => g.artifacts) };
+        }).sort((a, b) => SEV_RANK[a.severity] - SEV_RANK[b.severity] || b.groups[0].artifacts.length - a.groups[0].artifacts.length || a.code.localeCompare(b.code)),
         scanners: { installed, known: SCANNERS.map((x) => ({ id: x.id, home: x.home })), last: lastScan ? { at: lastScan.at, ran: lastScan.ran, note: lastScan.note, findings: lastScan.diagnostics.length } : null },
         suppressed: lint.diagnostics.filter((x) => x.suppressed).length,
         config: outside,
       },
       rows: list,
-      totals: { artifacts: list.length, high: sum('high'), medium: sum('medium'), fixable: sum('fixable'), security: sum('security'), alwaysOn: sum('alwaysOn'),
-        outdated: list.reduce((n, r) => n + r.guidance.A, 0), hypotheses: list.reduce((n, r) => n + r.guidance.B, 0) },
+      workspace,
+      totals: { artifacts: list.length, high: sum('high') + ws('high'), medium: sum('medium') + ws('medium'), fixable: sum('fixable'), security: sum('security') + wsLive.filter((f) => f.category === 'security' || f.category === 'scanner').length, alwaysOn: sum('alwaysOn') + workspace.instructions.reduce((n, i) => n + (i.tokens ?? 0), 0),
+        outdated: list.reduce((n, r) => n + r.guidance.A, 0), hypotheses: list.reduce((n, r) => n + r.guidance.B, 0), workspaceFiles: workspace.files, workspaceHigh: ws('high'), workspaceMedium: ws('medium') },
     };
   }
 
@@ -779,6 +845,48 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
     };
   }
 
+  // Open a repository URL from the page: fetch it read-only, serve it from a read-only Studio of
+  // its own, hand the page the id it addresses that Studio by.
+  async function openRemote(payload: any) {
+    const raw = typeof payload?.url === 'string' ? payload.url.trim() : '';
+    if (!raw || !isRemoteTarget(raw)) throw new Error('enter a git repository URL — https://host/owner/repo, git@host:owner/repo, ssh://… (optionally #ref:path)');
+    const fetched = await fetchRemote(parseRemote(raw), { timeoutSec: opts.timeout });
+    try {
+      const target = (await isDirectory(fetched.target)) ? fetched.target : fetched.root;
+      const handle = await startStudio(target, { ...opts, _: [], port: 0, repo: fetched });
+      const id = crypto.randomBytes(8).toString('hex');
+      opened.push({ id, handle, fetched });
+      while (opened.length > MAX_REMOTE) { const old = opened.shift()!; await old.handle.close(); fsSync.rmSync(old.fetched.dir, { recursive: true, force: true }); }
+      return { id, label: fetched.spec.label, ref: fetched.spec.ref, commit: fetched.commit, path: fetched.spec.subpath || null };
+    } catch (e) { fsSync.rmSync(fetched.dir, { recursive: true, force: true }); throw e; }
+  }
+  async function closeRemote(id: unknown) {
+    const i = opened.findIndex((o) => o.id === id);
+    if (i < 0) return { closed: false };
+    const [o] = opened.splice(i, 1);
+    await o.handle.close();
+    fsSync.rmSync(o.fetched.dir, { recursive: true, force: true });
+    return { closed: true };
+  }
+  // Relay one /api call to an opened repository's Studio: its token, its Host; the body streamed
+  // as is. That Studio enforces read-only itself.
+  function relay(o: { handle: StudioHandle }, req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse, pathAndQuery: string): void {
+    const headers: Record<string, string> = { 'x-saut-token': o.handle.token, host: `127.0.0.1:${o.handle.port}` };
+    for (const h of ['content-type', 'content-length']) if (typeof req.headers[h] === 'string') headers[h] = req.headers[h] as string;
+    const up = httpRequest({ host: '127.0.0.1', port: o.handle.port, method: req.method, path: pathAndQuery, headers }, (r) => {
+      res.writeHead(r.statusCode ?? 502, { 'content-type': r.headers['content-type'] ?? 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
+      r.pipe(res);
+    });
+    up.on('error', (e) => { if (!res.headersSent) { res.writeHead(502, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: `the repository view stopped: ${e.message}` })); } });
+    req.pipe(up);
+  }
+  const isDirectory = (p: string) => fs.stat(p).then((s) => s.isDirectory(), () => false);
+  // Synchronous on purpose: it also runs from a SIGINT handler, where an await may never resume.
+  function dispose(): void {
+    for (const o of opened) { o.handle.dispose(); fsSync.rmSync(o.fetched.dir, { recursive: true, force: true }); }
+    opened.length = 0;
+  }
+
   const realRoot = await fs.realpath(root).catch(() => root);
   const server = createServer(async (req, res) => {
     const send = (code: number, body: unknown, type = 'application/json') => {
@@ -800,10 +908,10 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
         // bar; afterwards the cookie alone opens the page. Without either, nothing is served.
         if (url.searchParams.has('k')) {
           if (!tokenOk(url.searchParams.get('k'), launchKey)) return send(403, 'This is not the address saut studio printed.', 'text/plain; charset=utf-8');
-          res.writeHead(303, { location: '/', 'set-cookie': `${COOKIE}=${launchKey}; HttpOnly; SameSite=Strict; Path=/`, 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' });
+          res.writeHead(303, { location: '/', 'set-cookie': `${cookieName(boundPort)}=${launchKey}; HttpOnly; SameSite=Strict; Path=/`, 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' });
           return res.end();
         }
-        if (!tokenOk(cookieOf(req.headers.cookie), launchKey))
+        if (!tokenOk(cookieOf(req.headers.cookie, cookieName(boundPort)), launchKey))
           return send(403, 'Open the address saut studio printed in the terminal (it carries a one-time key).', 'text/plain; charset=utf-8');
         // A mutating loopback UI must not be frameable: the token lives INSIDE the page, so
         // CSRF headers do not protect against a foreign page iframing it and stealing clicks.
@@ -828,6 +936,15 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
       if (pathname.startsWith('/api/') && !pathname.startsWith('/api/test/')
         && !tokenOk(req.headers['x-saut-token'], token))
         return send(403, { error: 'bad or missing token' });
+      // an opened remote repository: everything for it goes to its own read-only Studio
+      const wsId = req.headers['x-saut-ws'];
+      if (typeof wsId === 'string' && wsId && pathname.startsWith('/api/')) {
+        const o = opened.find((x) => x.id === wsId);
+        if (!o) return send(404, { error: 'that repository is no longer open — scan it again', closedRepo: true });
+        const origin = req.headers.origin;
+        if (req.method === 'POST' && origin && origin !== `http://127.0.0.1:${boundPort}` && origin !== `http://localhost:${boundPort}`) return send(403, { error: 'bad origin' });
+        return relay(o, req, res, url.pathname + url.search);
+      }
       if (req.method === 'GET' && pathname === '/api/context') return send(200, await context());
       if (req.method === 'GET' && pathname === '/api/overview') return send(200, await overview());
       if (req.method === 'GET' && (pathname === '/api/cases' || pathname === '/api/runs' || pathname === '/api/run')) {
@@ -876,6 +993,14 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
           let payload: any;
           try { payload = raw ? JSON.parse(raw) : {}; }
           catch (e) { return send(400, { error: `malformed JSON body: ${(e as Error).message}` }); }
+          if (locked && !READ_ONLY_POST.has(pathname) && !(launcher && pathname.startsWith('/api/remote'))) return send(403, { error: 'this Studio shows a remote repository read-only — clone it and open the clone to change or run anything' });
+          if (pathname === '/api/remote/close') return send(200, await closeRemote(payload.id));
+          if (pathname === '/api/remote') {
+            if (remote) return send(403, { error: 'a remote repository\'s Studio opens no further repositories' });
+            if (busy) return send(409, { error: 'another action is still running' });
+            busy = true;
+            try { return send(200, await openRemote(payload)); } finally { busy = false; }
+          }
           if (pathname === '/api/emit') return send(200, { text: emitFrontmatter(payload.frontmatter ?? {}) });
           if (pathname === '/api/save') { const r = await save(payload); return send(200, { ...r, path: relOf(r.path), passport: await passport(r.path) }); }
           if (pathname === '/api/compose') return send(200, await composeEdit(payload));
@@ -921,6 +1046,11 @@ export async function startStudio(root: string, opts: Opts & { port?: number }):
   return {
     server, token, port: boundPort, url: `http://127.0.0.1:${boundPort}/?k=${launchKey}`,
     // open event streams would keep close() waiting forever; a bench side still running is stopped
-    close: () => new Promise<void>((r) => { for (const c of children) c.kill('SIGKILL'); server.close(() => r()); server.closeAllConnections(); }),
+    close: async () => {
+      await Promise.all(opened.map((o) => o.handle.close()));
+      dispose();
+      await new Promise<void>((r) => { for (const c of children) c.kill('SIGKILL'); server.close(() => r()); server.closeAllConnections(); });
+    },
+    dispose,
   };
 }

@@ -203,11 +203,14 @@ export function lintGuidance(a: Artifact, o: GuidanceOptions): Diagnostic[] {
   if (echo >= 0)
     d('reasoning-echo', 'low', `asks the model to reproduce its reasoning: "${clip(prose[echo])}"`, { line: at(echo) });
 
-  // Codex drops an agent's tools list; a read-only agent can still be held by the sandbox
+  // Codex drops an agent's tools list, and a custom agent file cannot override the parent's
+  // sandbox (subagents doc, 2026-11-15) — a per-agent sandbox no longer satisfies the finding
   const cx = byId.get('codex');
   if (a.kind === 'agent' && cx && cx.agentAllowlist === 'dropped' && claimsReadOnlyOf(a)
-    && !(a.tools ?? []).some((t) => ['Write', 'Edit', 'NotebookEdit', 'MultiEdit'].includes(t.base)) && !o.sandboxed?.has(a.name))
-    d('codex-agent-sandbox', 'info', 'claims read-only, but on Codex its tools list is dropped — nothing mechanical holds the promise there', { line: a.fm.lines.tools ?? a.fm.lines.name }, cx);
+    && !(a.tools ?? []).some((t) => ['Write', 'Edit', 'NotebookEdit', 'MultiEdit'].includes(t.base)))
+    d('codex-agent-sandbox', 'info', o.sandboxed?.has(a.name)
+      ? 'claims read-only; the deployment sets a sandbox for it in the agent file, but Codex ignores `sandbox_mode` there — the agent inherits the parent session\'s sandbox'
+      : 'claims read-only, but on Codex its tools list is dropped and the agent inherits the parent session\'s sandbox — nothing mechanical holds the promise there', { line: a.fm.lines.tools ?? a.fm.lines.name }, cx);
 
   return out;
 }
@@ -224,8 +227,8 @@ export async function deploymentOf(ctx: TautContext): Promise<{ file: string; te
   } catch { return null; }
 }
 
-// Agents the deployment already sandboxes on Codex (manifest.agentSandbox) — the D finding
-// is satisfied there.
+// Agents the deployment sandboxes on Codex (manifest.agentSandbox). Codex no longer honours
+// `sandbox_mode` in an agent file, so this only changes the finding's wording.
 export function sandboxedAgents(dep: { manifest: any } | null): Set<string> {
   const s = dep?.manifest?.agentSandbox;
   return new Set(s && typeof s === 'object' ? Object.keys(s).filter((k) => !k.startsWith('$')) : []);

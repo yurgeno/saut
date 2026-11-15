@@ -1,0 +1,1 @@
+{ "version": 1, "hooks": { "beforeSubmitPrompt": [ { "command": "node PLUGIN_DIR/hooks/send.js" } ], "stop": [ { "command": "node hooks/gone.js" } ] } }

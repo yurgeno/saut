@@ -7,7 +7,8 @@
 import type { Diagnostic, RuleCategory } from './types.mts';
 
 // `heuristic`: the rule reads prose or patterns and can be wrong about a particular artifact.
-export interface RuleInfo { category: RuleCategory; title: string; why: string; fix: string; heuristic?: boolean }
+// `section`: the RULES.md section, when it is not the category's (the agent-workspace rules).
+export interface RuleInfo { category: RuleCategory; title: string; why: string; fix: string; heuristic?: boolean; section?: string }
 
 const DOC = 'https://github.com/yurgeno/saut/blob/master/docs/RULES.md';
 const SECTION: Record<RuleCategory, string> = {
@@ -17,13 +18,16 @@ const SECTION: Record<RuleCategory, string> = {
 
 export const RULES: Record<string, RuleInfo> = {
   // ---- privileges ----------------------------------------------------------------------
+  // The two below are documented with the privilege rules but counted as SECURITY everywhere
+  // (Overview column, Security card, the skill's panel, the report): the full toolset is what an
+  // injection acts with, and one word must mean one set of findings on every screen.
   'no-allowlist': {
-    category: 'privileges', title: 'No tool allowlist',
+    category: 'security', section: 'privileges', title: 'No tool allowlist',
     why: 'Without an allowlist the artifact runs with every tool of the session — writes, web, every MCP server — whatever its body says it does.',
     fix: 'Declare the tools the body actually uses: `allowed-tools` for a skill, `tools` for an agent. Start from Read, Glob, Grep and add only what a step needs.',
   },
   'model-invocable-writer': {
-    category: 'privileges', title: 'Model can invoke a writing skill on its own',
+    category: 'security', section: 'privileges', title: 'Model can invoke a writing skill on its own',
     why: 'The model may fire this skill without being asked, and the skill can change files or drive an expensive runtime.',
     fix: 'Set `disable-model-invocation: true` so only a person starts it with /name. If it must stay model-invocable, drop the writing tools or scope Bash to read-only verbs.',
   },
@@ -86,6 +90,88 @@ export const RULES: Record<string, RuleInfo> = {
     category: 'privileges', title: 'Agent writes files through Bash', heuristic: true,
     why: 'The agent is meant to write a file but only has Bash — a superset of Write that can also delete, run and fetch.',
     fix: 'Grant `Write` (or `Edit`) for the file it produces and scope or remove Bash.',
+  },
+
+  // ---- agent workspace: hooks, MCP, settings, instructions, commands, manifests, code -------
+  'remote-code': {
+    category: 'security', section: 'agent-workspace', title: 'Downloads code and runs it',
+    why: 'A hook, an MCP server or a script it runs fetches code and executes it (curl … | sh): whatever the server returns that day runs with your rights, unreviewed.',
+    fix: 'Vendor the script into the repository, or pin it by version and checksum and run the checked file.',
+  },
+  'unpinned-package': {
+    category: 'security', section: 'agent-workspace', title: 'Runs a package without a pinned version',
+    why: '`npx -y pkg`, `uvx pkg` or a `:latest` image fetch whatever the registry serves at start — a compromised release runs in every session, with access to the workspace.',
+    fix: 'Pin an exact version (`pkg@1.4.2`, `pkg==1.4.2`, an image digest) and update it deliberately.',
+  },
+  'insecure-url': {
+    category: 'security', section: 'agent-workspace', title: 'Plain-http endpoint',
+    why: 'An MCP server or an http hook reached over http:// sends tool calls, results or hook payloads unencrypted and accepts altered responses.',
+    fix: 'Use https://, or keep the server on localhost.',
+  },
+  'exec-network': {
+    category: 'security', section: 'agent-workspace', title: 'Executed code can reach the network', heuristic: true,
+    why: 'Code a hook or plugin runs can send data out. Hooks on prompt and tool events receive the prompt, tool input and output — what such code could send is whatever the agent sees.',
+    fix: 'Check what it sends and where. Keep it off by default, make the destination a setting the user opts into, and say so in the README.',
+  },
+  'exec-credentials': {
+    category: 'security', section: 'agent-workspace', title: 'Executed code reads credentials', heuristic: true,
+    why: 'A hook or plugin that reads tokens, keys or credential files runs on every matching event without the user asking.',
+    fix: 'Remove the read, or document why the hook needs it and scope it to the one variable it uses.',
+  },
+  'exec-dynamic-code': {
+    category: 'security', section: 'agent-workspace', title: 'Executed code builds code at run time', heuristic: true,
+    why: '`eval`, `new Function` or `vm.run*` on a computed string runs code that is not in the repository — a review of the files does not cover it.',
+    fix: 'Replace it with ordinary code; if a pattern must be evaluated, pass it as data.',
+  },
+  'exec-background': {
+    category: 'hygiene', section: 'agent-workspace', title: 'Hook starts a background process',
+    why: 'A detached process outlives the hook: it keeps running after the agent has moved on, unseen, and is not bound by the hook timeout.',
+    fix: 'Do the work inside the hook within its timeout, or document the background process and how to stop it.',
+  },
+  'permissions-bypass': {
+    category: 'security', section: 'agent-workspace', title: 'Project settings switch approvals off',
+    why: 'Committed settings that bypass permission prompts or the sandbox (bypassPermissions, danger-full-access, approval never, yolo, OpenCode allow) apply to everyone who opens the project — including after a malicious commit.',
+    fix: 'Remove it from the shared settings; a person who wants it sets it in their own user settings or on the command line.',
+  },
+  'permissions-broad-allow': {
+    category: 'security', section: 'agent-workspace', title: 'Settings pre-approve any shell command',
+    why: 'An allow rule for bare Bash/Shell (or a Codex rule that allows an interpreter outside the sandbox) lets every command run without a prompt, so an injected instruction runs too.',
+    fix: 'Pre-approve the exact commands the project needs (`Bash(npm test)`, `Bash(git status *)`), not the shell.',
+  },
+  'mcp-auto-approve': {
+    category: 'security', section: 'agent-workspace', title: 'MCP servers approved without asking',
+    why: '`enableAllProjectMcpServers` starts every server in .mcp.json (including ones a later commit adds) without a prompt; Gemini `trust: true` runs a server\'s tools without confirmation.',
+    fix: 'List the approved servers by name (`enabledMcpjsonServers`) or drop `trust` so each tool call is confirmed.',
+  },
+  'outbound-option': {
+    category: 'security', section: 'agent-workspace', title: 'Plugin option sends data out',
+    why: 'A user setting of the plugin names an address that receives data (a webhook). It is off until set, but whoever sets it should know what leaves the machine.',
+    fix: 'Document exactly what is sent; keep it opt-in and never default it to a third-party address.',
+  },
+  'missing-file': {
+    category: 'hygiene', section: 'agent-workspace', title: 'Wired-in file is missing',
+    why: 'A manifest or hook names a file that is not in the repository: that part fails to load, or runs a file from outside the repository that nobody reviewed.',
+    fix: 'Commit the file, or fix the path.',
+  },
+  'config-syntax': {
+    category: 'syntax', section: 'agent-workspace', title: 'Workspace file does not parse',
+    why: 'A settings, hooks, MCP or command file that does not parse is skipped or rejected by the harness — its hooks, servers or permissions silently do not apply.',
+    fix: 'Fix the syntax at the line given.',
+  },
+  'instructions-over-limit': {
+    category: 'hygiene', section: 'agent-workspace', title: 'Instructions over the harness limit',
+    why: 'Codex reads at most project_doc_max_bytes (32 KiB) of AGENTS.md; the rest is dropped without a warning.',
+    fix: 'Shorten it: move procedures into skills that load on demand, keep the always-on rules.',
+  },
+  'instructions-heavy': {
+    category: 'hygiene', section: 'agent-workspace', title: 'Large always-on instructions',
+    why: 'An instruction file loads into every session: its tokens are paid on every turn and crowd the context before work starts.',
+    fix: 'Keep the rules every session needs; move procedures and references into skills or linked files.',
+  },
+  'instructions-import-outside': {
+    category: 'hygiene', section: 'agent-workspace', title: 'Instructions import a file from outside the repository',
+    why: '`@~/…` or `@/…` pulls in a file that differs per machine and that a reviewer of the repository cannot see.',
+    fix: 'Import a file from the repository, or move the personal part to CLAUDE.local.md.',
   },
 
   // ---- security ------------------------------------------------------------------------
@@ -205,8 +291,8 @@ export const RULES: Record<string, RuleInfo> = {
   },
   'codex-agent-sandbox': {
     category: 'guidance', title: 'Read-only agent without a Codex sandbox', heuristic: true,
-    why: 'Codex drops an agent\'s tools list, so a read-only promise holds on prose alone there.',
-    fix: 'If the agent needs neither writes nor the network, run it with `sandbox_mode = "read-only"` (in a TAUT pack: `manifest.agentSandbox`). A read-only sandbox also blocks the network.',
+    why: 'Codex drops an agent\'s tools list, and a custom agent file cannot override the parent session\'s `sandbox_mode` — a read-only promise holds on prose alone there.',
+    fix: 'Switch off what the agent does not need in its TOML (`features.shell_tool = false`; also `apps`, `plugins`, `memories`, `request_permissions_tool`), or run the work from a parent session with a read-only sandbox (`--sandbox read-only` or a `:read-only` permission profile). `sandbox_mode` in the agent file (in a TAUT pack: `manifest.agentSandbox`) has no effect there.',
   },
 
   // ---- TAUT wiring ---------------------------------------------------------------------
@@ -274,7 +360,7 @@ export function ruleInfo(code: string): RuleInfo | null {
 
 export function docFor(code: string): string {
   const info = ruleInfo(code);
-  return info ? `${DOC}#${SECTION[info.category]}` : DOC;
+  return info ? `${DOC}#${info.section ?? SECTION[info.category]}` : DOC;
 }
 
 // Attach the rule-level guidance to each finding. Pure: returns new objects.

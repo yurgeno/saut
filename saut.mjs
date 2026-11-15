@@ -16,6 +16,8 @@
 //   adapters/taut.mts TAUT packs: engine-parsed frontmatter, wiring vs catalog, compile preview
 //   bench/*.mts      the test bench: cases, scratch workspaces, runners, obedience, orchestrator
 //   studio/*         the loopback UI (server.mts + studio.html) over the same library functions
+//   remote.mts       git repository URLs as targets: fetched read-only, scanned, removed
+//   report.mts       `saut report`: one complete document (Markdown / HTML / JSON)
 //   commands.mts     lint / cost / passport / preview / test / harnesses / tools
 import process from 'node:process';
 
@@ -26,17 +28,19 @@ if (nodeMajor < 24) {
 }
 
 const { SautError } = await import('./lib/util.mts');
+const { materializeTargets } = await import('./lib/remote.mts');
+const { cmdReport } = await import('./lib/report.mts');
 const { VERSION, cmdCost, cmdGuidance, cmdHarnesses, cmdLint, cmdPassport, cmdPreview, cmdStudio, cmdTest, cmdTools } = await import('./lib/commands.mts');
 
 // Flags are declared, not hand-rolled per branch: a missing value, a non-numeric value or a
 // number out of range is a USAGE error (exit 2) with a message naming the flag — never an
 // undefined that turns into NaN and silently changes behaviour three modules later.
-const BOOL_FLAGS = new Set(['--json', '--sarif', '--live', '--exact', '--strict', '--no-taut', '--scan', '--keep', '--fix', '--write']);
+const BOOL_FLAGS = new Set(['--no-workspace', '--json', '--sarif', '--live', '--exact', '--strict', '--no-taut', '--scan', '--keep', '--fix', '--write']);
 const VALUE_FLAGS = {
   '--catalog': 'catalog', '--budget': 'budget', '--taut': 'taut', '--deployment': 'deployment',
   '--scanner': 'scanner', '--workspace': 'workspace', '--since': 'since', '--until': 'until',
   '--model': 'model', '--judge-model': 'judgeModel', '--landscape': 'landscape', '--case': 'case',
-  '--out': 'out', '--only': 'only', '--label': 'label', '--pair': 'pair',
+  '--out': 'out', '--only': 'only', '--label': 'label', '--pair': 'pair', '--format': 'format',
 };
 const NUMBER_FLAGS = {
   '--level': { key: 'level', min: 1, max: 4, int: true },
@@ -46,6 +50,7 @@ const NUMBER_FLAGS = {
   '--port': { key: 'port', min: 0, max: 65535, int: true },
 };
 const BOOL_KEY = {
+  '--no-workspace': 'noWorkspace',
   '--json': 'json', '--sarif': 'sarif', '--live': 'live', '--exact': 'exact', '--strict': 'strict',
   '--no-taut': 'noTaut', '--scan': 'scan', '--keep': 'keep', '--fix': 'fix', '--write': 'write',
 };
@@ -95,15 +100,23 @@ Lint, cost and test agent skills and subagents for any harness.
 Usage: saut <command> [targets…] [options]
 
 Commands
-  lint [paths…]        privilege/correctness findings per artifact + per-harness enforcement
-                       (a path = SKILL.md, a skill dir, an agent .md, or a tree to walk)
+  lint [paths…]        privilege/correctness findings per artifact + per-harness enforcement,
+                       and the agent workspace: hooks, MCP servers, settings, instruction files,
+                       commands, plugin manifests and the code they run (--no-workspace: skip it)
+                       (a path = SKILL.md, a skill dir, an agent .md, or a tree to walk —
+                       or a git repository URL, see Remote targets)
   cost [paths…]        token passport: always-on (listing) / on-invoke (body + wired agents)
   passport [paths…]    lint + cost + harness matrix as one JSON document
+  report [path | url]  one complete report: source + commit, totals, security at a glance, every
+                       artifact's enforcement, cost and findings with fixes. Markdown to stdout;
+                       --format html|json, --out <file> (format from its extension). Exit as lint.
   harnesses            the capability registry (what each harness enforces / degrades)
   guidance             how old the vendor guidance (models, effort, prompting) is, and where this
                        machine's harness CLIs and model catalogs disagree with it (exit 1 if so)
   tools [dir]          the tool registry: builtin per harness + MCP catalog (+ --live)
-  studio [dir]         the local UI over all of the above: form + editor, passport, bench, publish
+  studio [dir | url]   the local UI over all of the above: form + editor, passport, bench, publish.
+                       No argument: a start page that takes a git repository URL and opens it
+                       read-only in the same tab. A URL: that repository, read-only.
   preview <name> [dir] TAUT packs: the compiled bytes of one skill/agent per harness (engine render)
   test <skill|agent>   the bench: L1 compile into a scratch workspace · L2 trigger (does each
                        harness fire the skill — explicit / implicit / control) · L3 obedience
@@ -126,6 +139,16 @@ Options
   --fix [--write]      lint: show the mechanical fixes as a diff; --write applies the SAFE ones and
   --only <codes>       re-lints; fixes marked review (they change behaviour or rest on a heuristic)
                        are written only for the rule codes listed in --only
+
+Remote targets (lint, cost, passport, report, studio)
+  <url>[#ref][:path]   https://host/owner/repo(.git) · ssh://… · git@host:owner/repo · file://…
+                       e.g. https://github.com/o/r#v1.2:skills/review, or a browse URL
+                       https://github.com/o/r/tree/main/skills/review. One commit is fetched
+                       read-only into a temporary directory (no submodules, no hooks, symlinks
+                       as plain files) and removed afterwards (--keep keeps it). Private repos
+                       use your git credentials; nothing prompts. --timeout <s> bounds the fetch
+                       (default 180). --live and --fix refuse a remote target; the Studio serves
+                       it read-only (no save, fix, suppression, bench or agent review).
 
 TAUT packs (auto-detected: pack.json + skills/ or <project>/deployment.json)
   --taut <dir>         the TAUT engine to import (default: $SAUT_TAUT_ENGINE, ~/taut)
@@ -157,7 +180,7 @@ Exit codes: 0 clean/within budget/bench passed · 1 findings/over budget/bench f
 
 const opts = parseArgs(process.argv.slice(2));
 const cmd = opts._.shift();
-const table = { lint: cmdLint, cost: cmdCost, passport: cmdPassport, preview: cmdPreview, test: cmdTest, studio: cmdStudio, harnesses: cmdHarnesses, tools: cmdTools, guidance: cmdGuidance };
+const table = { report: cmdReport, lint: cmdLint, cost: cmdCost, passport: cmdPassport, preview: cmdPreview, test: cmdTest, studio: cmdStudio, harnesses: cmdHarnesses, tools: cmdTools, guidance: cmdGuidance };
 // Writes to a pipe are asynchronous: process.exit() right after a large write cuts the output
 // at the pipe buffer (64 KB) — `saut lint --json | jq` got half a document. An empty write's
 // callback fires once everything queued before it has been handed to the OS.
@@ -177,9 +200,18 @@ async function exit(code) {
 if (opts.version || cmd === 'version') { process.stdout.write(`${VERSION}\n`); await exit(0); }
 if (!cmd || opts.help || cmd === 'help') { process.stdout.write(HELP); await exit(0); }
 if (!table[cmd]) { process.stderr.write(`saut: unknown command "${cmd}"\n\n${HELP}`); await exit(2); }
+// A repository URL among the targets is fetched read-only into a throwaway directory first
+// (lib/remote.mts) and removed after the command, whatever its outcome.
+let cleanup = async () => {};
+let code;
 try {
-  await exit(await table[cmd](opts));
+  const m = await materializeTargets(cmd, opts);
+  cleanup = m.cleanup;
+  if (m.fetched.length) opts.remote = m.fetched;
+  code = await table[cmd](opts);
 } catch (e) {
   process.stderr.write(`saut: ${e instanceof SautError ? e.message : (e && e.stack) || e}\n`);
-  await exit(2);
+  code = 2;
 }
+await cleanup();
+await exit(code);

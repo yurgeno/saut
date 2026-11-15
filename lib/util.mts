@@ -72,7 +72,30 @@ export const c = {
   cyan: (s: string) => (tty ? `\x1b[36m${s}\x1b[0m` : s),
 };
 
+// A remote target is fetched into a throwaway directory; the output names the repository and
+// the commit instead (`github.com/o/r@1a2b3c4d5e6f/skills/x/SKILL.md`), in text and JSON alike.
+const displayRoots: { root: string; label: string }[] = [];
+export function setDisplayRoot(root: string, label: string): void {
+  displayRoots.push({ root: path.resolve(root), label });
+}
+export function shown(p: string): string {
+  for (const { root, label } of displayRoots) {
+    if (p === root) return label;
+    if (p.startsWith(root + path.sep)) return label + '/' + p.slice(root.length + 1).split(path.sep).join('/');
+  }
+  return p;
+}
+// Any string that embeds a throwaway path (a finding message, a note) gets the label too.
+export function shownText(s: string): string {
+  for (const { root, label } of displayRoots) s = s.split(root).join(label);
+  return s;
+}
+export function toJson(x: unknown, indent = 2): string {
+  return JSON.stringify(x, displayRoots.length ? (_k, v) => (typeof v === 'string' ? shownText(v) : v) : undefined, indent);
+}
+
 export function rel(p: string): string {
+  if (displayRoots.length && shown(p) !== p) return shown(p);
   const r = path.relative(process.cwd(), p);
   return r && !r.startsWith('..') ? r : p;
 }

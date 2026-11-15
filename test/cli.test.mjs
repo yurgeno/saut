@@ -55,14 +55,15 @@ test('lint --json and --sarif are machine-readable', async () => {
   const s = JSON.parse((await saut(['lint', PACK, '--catalog', CATALOG, '--sarif'])).stdout);
   assert.equal(s.version, '2.1.0');
   assert.equal(s.runs[0].tool.driver.name, 'saut');
-  assert.ok(s.runs[0].results.some((r) => r.ruleId === 'no-allowlist' && r.level === 'error'));
+  assert.ok(s.runs[0].results.some((r) => r.ruleId === 'secret-pattern' && r.level === 'error'), 'high → error');
+  assert.ok(s.runs[0].results.some((r) => r.ruleId === 'no-allowlist' && r.level === 'note'), 'low → note: a read-only skill without an allowlist is hygiene');
 });
 
 test('lint --harness subset and --strict', async () => {
   const r = await saut(['lint', path.join(PACK, 'skills', 'fx-readonly'), '--catalog', CATALOG, '--harness', 'codex']);
   assert.match(r.stdout, /enforcement codex=prose\n/);
   assert.ok(!r.stdout.includes('claude-code='));
-  const strict = await saut(['lint', path.join(PACK, 'skills', 'fx-dead'), '--catalog', CATALOG, '--strict']);
+  const strict = await saut(['lint', path.join(PACK, 'skills', 'fx-readonly'), '--catalog', CATALOG, '--strict']);
   assert.equal(strict.code, 1, 'medium-only findings fail under --strict');
 });
 
@@ -96,7 +97,7 @@ test('output larger than a pipe buffer arrives whole (exit waits for stdout to d
     for (let i = 0; i < 120; i++) {
       const dir = path.join(root, 'skills', `fx-big-${i}`);
       await fs.mkdir(dir, { recursive: true });
-      await fs.writeFile(path.join(dir, 'SKILL.md'), `---\nname: fx-big-${i}\ndescription: A skill with no allowlist that reads the tracker. Invoke: fx-big-${i}.\n---\n# fx-big-${i}\nRead-only. Fetch the jira ticket and summarise it.\n`);
+      await fs.writeFile(path.join(dir, 'SKILL.md'), `---\nname: fx-big-${i}\ndescription: A skill with no allowlist that reads the tracker. Invoke: fx-big-${i}.\n---\n# fx-big-${i}\nFetch the jira ticket and fix the code it names.\n`);
     }
     const r = await saut(['lint', root, '--json']);
     assert.ok(r.stdout.length > 65536, `output is ${r.stdout.length} bytes — the test needs more than a pipe buffer`);

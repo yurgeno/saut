@@ -25,6 +25,16 @@ export interface Diagnostic {
   heuristic?: boolean;     // the rule reads prose/patterns and can be wrong for this artifact
   guidance?: GuidanceMark; // a vendor-guidance finding: its class, when it was verified, from where
   suppressed?: { reason: string; file: string };   // silenced in saut.json — kept, marked, not counted
+  evidence?: Evidence[];   // why THIS severity: the lines the estimate rests on, and what was looked for and not found
+}
+
+// The facts a severity estimate rests on. A rule that reads prose guesses at intent; showing the
+// line it read lets the reader overrule the guess instead of trusting a bare "high".
+export interface Evidence {
+  says: string;            // what the line was taken to show ("asks for changes"), or what was not found
+  found: boolean;          // false: looked for and absent — the reason the severity is NOT higher
+  line?: number;           // 1-based file line
+  quote?: string;          // the line itself, trimmed
 }
 
 export type RuleCategory = 'security' | 'privileges' | 'hygiene' | 'syntax' | 'taut' | 'scanner' | 'guidance';

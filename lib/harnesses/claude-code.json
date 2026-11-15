@@ -7,7 +7,7 @@
     "https://code.claude.com/docs/en/tools-reference",
     "https://code.claude.com/docs/en/sub-agents",
     "https://code.claude.com/docs/en/context-window",
-    "tools list snapshot: https://code.claude.com/docs/en/tools-reference (2026-09-03)"
+    "tools list snapshot: https://code.claude.com/docs/en/tools-reference (2026-11-15)"
   ],
   "skillsDirs": [
     ".claude/skills"
@@ -48,6 +48,7 @@
     "SendUserFile",
     "ShareOnboardingGuide",
     "Skill",
+    "SubagentHandback",
     "TaskCreate",
     "TaskGet",
     "TaskList",
@@ -131,13 +132,16 @@
     }
   ],
   "models": {
-    "verifiedAt": "2026-10-10",
+    "verifiedAt": "2026-11-15",
     "sources": [
       "https://code.claude.com/docs/en/model-config",
       "https://code.claude.com/docs/en/sub-agents",
-      "https://code.claude.com/docs/en/changelog"
+      "https://code.claude.com/docs/en/changelog",
+      "https://platform.claude.com/docs/en/models/fable-5-2/overview",
+      "https://platform.claude.com/docs/en/about-claude/model-deprecations",
+      "local: claude 2.1.325 (fable → claude-fable-5-2, default effort medium)"
     ],
-    "note": "Alias resolution is the Anthropic API one; on Bedrock, Vertex, Foundry and the AWS platform `opus`/`sonnet` can resolve to older models and `haiku` resolves to Haiku 4.5 (model-config). `haiku` → Haiku 5.5 needs Claude Code 2.1.293 or newer. `model:` and `effort:` are honoured in skill and subagent frontmatter.",
+    "note": "Alias resolution is the Anthropic API one; on other providers the aliases can resolve to older models — Bedrock: `sonnet` Sonnet 4.5, `opus` Opus 5.5; Foundry: `sonnet` Sonnet 4.5, `opus` Opus 4.6; Claude Platform on AWS: `sonnet` Sonnet 4.6; `haiku` is Haiku 4.5 on all of them (model-config). `haiku` → Haiku 5.5 needs Claude Code 2.1.293 or newer; `fable` → Fable 5.2 needs 2.1.321 or newer (Fable 5 in Claude apps gateway sessions), and from 2.1.321 `best` means the same as `opus`. Default efforts are Claude Code's (medium for the current models); the API defaults Fable 5.2 and Sonnet 5.5 to high. `model:` and `effort:` are honoured in skill and subagent frontmatter.",
     "efforts": [
       "low",
       "medium",
@@ -149,7 +153,7 @@
       "opus": "claude-opus-5-5",
       "sonnet": "claude-sonnet-5-5",
       "haiku": "claude-haiku-5-5",
-      "fable": "claude-fable-5-1",
+      "fable": "claude-fable-5-2",
       "opus[1m]": "claude-opus-5-5",
       "sonnet[1m]": "claude-sonnet-5-5",
       "best": null,
@@ -159,7 +163,7 @@
     },
     "catalog": [
       {
-        "id": "claude-fable-5-1",
+        "id": "claude-fable-5-2",
         "status": "current",
         "efforts": [
           "low",
@@ -167,7 +171,20 @@
           "high",
           "xhigh",
           "max"
-        ]
+        ],
+        "defaultEffort": "medium"
+      },
+      {
+        "id": "claude-mythos-5-2",
+        "status": "current",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "note": "limited availability; same specs and price as Fable 5.2"
       },
       {
         "id": "claude-opus-5-5",
@@ -204,6 +221,18 @@
           "max"
         ],
         "defaultEffort": "medium"
+      },
+      {
+        "id": "claude-fable-5-1",
+        "status": "previous",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "replacement": "fable"
       },
       {
         "id": "claude-fable-5",
@@ -299,7 +328,8 @@
         "id": "claude-sonnet-4-5",
         "status": "previous",
         "efforts": [],
-        "replacement": "sonnet"
+        "replacement": "sonnet",
+        "note": "the snapshot claude-sonnet-4-5-20250929 retires on the API 2026-11-30 (model-deprecations); still what `sonnet` resolves to on Bedrock and Foundry"
       }
     ]
   }
