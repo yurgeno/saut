@@ -119,9 +119,10 @@ and the code those hooks and plugins run. SAUT follows that code from script to 
 it without executing it.
 Where each harness looks is data in `lib/workspace.json`. `--no-workspace` skips it.
 
-**Severity follows evidence, and copies count once.** A skill without an allowlist that only reads
-and reports is hygiene (low); one whose text asks to change files is medium; add untrusted input
-and it is high. The same skill in several harness folders, or one instruction text saved for
+**Severity follows evidence, and copies count once.** A skill the model may start on its own is
+medium when its text asks to change files, and high when it also reads untrusted input. A skill
+without `allowed-tools` is not a finding by itself: the list restricts no skill on any harness, so
+such a skill runs with the session's permissions. The same skill in several harness folders, or one instruction text saved for
 several harnesses, is reported once with its copies listed. See [docs/RULES.md](docs/RULES.md).
 
 **Remote targets.** `lint`, `cost`, `passport`, `report` and `studio` also take a git repository URL: `https://`,

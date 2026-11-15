@@ -56,7 +56,7 @@ test('lint --json and --sarif are machine-readable', async () => {
   assert.equal(s.version, '2.1.0');
   assert.equal(s.runs[0].tool.driver.name, 'saut');
   assert.ok(s.runs[0].results.some((r) => r.ruleId === 'secret-pattern' && r.level === 'error'), 'high → error');
-  assert.ok(s.runs[0].results.some((r) => r.ruleId === 'no-allowlist' && r.level === 'note'), 'low → note: a read-only skill without an allowlist is hygiene');
+  assert.ok(s.runs[0].results.some((r) => r.ruleId === 'dead-privilege' && r.level === 'note'), 'low → note');
 });
 
 test('lint --harness subset and --strict', async () => {

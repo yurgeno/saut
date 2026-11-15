@@ -34,20 +34,37 @@ const READONLY_CLAIM_BODY = /(?:^|\n[ \t]*\n|(?:^|\n)#[^\n]*\n)[ \t]*read[- ]onl
 // "Full docs: https://…" fetches nothing.
 // A ticket or issue counts when the text READS it ("fetch it from the issue tracker", "read the
 // jira ticket"), not when it writes one or names the tracker: "split it into tickets", "/to-tickets".
-const EXTERNAL_INPUT = /\b((?:read|pull|load|open|get|download|triage|go through|look up)(?:s|es|ed|ing)?\s+(?:(?:the|a|an|each|every|its|their|all|open|new|incoming|linked)\s+)?(?:[\w-]+\s+){0,2}?(?:jira|tickets?|issues?|attachments?)|from (?:the |a |its )?(?:issue )?tracker|webfetch|websearch|web ?search|web pages?|context7|mcp__atlassian|mcp__context7|scrap\w*|fetch(?:es|ed|ing)?|(?:issue|pull request|PR|review) comments?|(?:open|read|load|download)s? (?:the |a |each )?(?:url|link|page)s?)\b|\bhttps?:\/\/\S*\{|\$\{?url\b/i;
+const EXTERNAL_INPUT = /\b((?:read|pull|load|open|get|download|triage|go through|look up)(?:s|es|ed|ing)?[ \t]+(?:(?:the|a|an|each|every|its|their|all|open|new|incoming|linked)[ \t]+)?(?:[\w-]+[ \t]+){0,2}?(?:jira|tickets?|issues?|attachments?)|from (?:the |a |its )?(?:issue )?tracker|webfetch|websearch|web ?search|web pages?|context7|mcp__atlassian|mcp__context7|scrap\w*|fetch(?:es|ed|ing)?|(?:issue|pull request|PR|review) comments?|(?:open|read|load|download)s? (?:the |a |each )?(?:url|link|page)s?)\b|\bhttps?:\/\/\S*\{|\$\{?url\b/i;
 // What raises a missing allowlist from hygiene to risk: the text tells the agent to change
 // files (an edit verb aimed at code or files) or to run a command that changes something.
 // Stricter than the per-tool evidence the dead-privilege rule uses — a false positive here
 // inflates severity, which is the noise this exists to cut.
-const EDIT_INTENT = /(?<!\b(?:the|these|those|scattered|small|many|multiple|such|of|by|your|its|their)\s)\b(?:edit|modify|patch|rewrite|refactor|fix|implement|create|write|delete|remove|rename|apply|add|commit)(?:s|es|ed|ing|ted|ting)?\s+(?:(?:the|a|an|this|that|each|every|your|its|new|all|missing|any)\s+)?(?:[\w-]+\s+){0,2}?(?:files?|code|functions?|modules?|tests?|class(?:es)?|components?|patch(?:es)?|commits?|bugs?|root cause|lines?|imports?|work|changes|features?)\b/i;
-const SHELL_MUTATION = /(?:```(?:bash|sh|shell|zsh)[^`]*?|\b(?:run|execute|call)s?\s+`)[^`]*\b(?:git\s+(?:commit|push|reset|checkout|rebase|merge|rm|clean)|rm\s+-|mv\s|sed\s+-i|npm\s+(?:install|publish)|pip\s+install|chmod|chown|curl\b[^`]*\|\s*(?:sh|bash))/i;
+const EDIT_INTENT = /(?<!\b(?:the|these|those|scattered|small|many|multiple|such|of|by|your|its|their|all|they)\s)(?<![\w-])(?:edit|modify|patch|rewrite|refactor|fix|implement|create|write|delete|remove|rename|apply|add|commit)(?:s|es)?[ \t]+(?:(?:the|a|an|this|that|each|every|your|its|new|all|missing|any)[ \t]+)?(?:[\w-]+[ \t]+){0,2}?(?:files?|code|functions?|modules?|tests?|class(?:es)?|components?|patch(?:es)?|commits?|bugs?|root cause|lines?|imports?|work|changes|features?)\b/i;
+const SHELL_MUTATION = /(?:```(?:bash|sh|shell|zsh)[^`]*?|\b(?:run|execute|call)s?\s+`)[^`]*\b(git\s+(?:commit|push|reset|checkout|rebase|merge|rm|clean)(?![\w-])|rm\s+-|mv\s|sed\s+-i|npm\s+(?:install|publish)|pip\s+install|chmod|chown|curl\b[^`]*\|\s*(?:sh|bash))/i;
 // "read-only" about the skill, not about a thing it uses ("a read-only token", "in read-only mode")
 const NO_CHANGE_CLAIM = /\b(?:changes nothing|report[- ]only|(?<!\bin )read[- ]only(?![- ](?:[\w-]+ )?(?:tool|token|PAT|mode|access|call|api|credentials?|scope|key|connection|user|replica|database|db|mount|copy|view|branch|repo|clone)s?\b)|one[- ]shot (?:report|display)|does not (?:change|modify|edit|write)|never (?:changes|modifies|edits|writes)|do not (?:change|modify|edit|write) (?:any|the) (?:code|files?))\b/i;
-// Index of the first match not negated within its clause ("do not edit the files"), or -1.
+// Fenced code blocks blanked out (same length, same line breaks), so prose heuristics do not read
+// example dialogue or sample commands as the author's own request ("Reviewer: \"Remove legacy code\"").
+export function blankFences(t: string): string {
+  return t.replace(/^([ \t]*)(```|~~~)[^\n]*\n[\s\S]*?(?:^[ \t]*\2[^\n]*$|(?![\s\S]))/gm, (m) => m.replace(/[^\n]/g, ' '));
+}
+// A shell command that changes something: the index of the COMMAND (not of the fence it sits in).
+function shellMutationAt(body: string): number {
+  const m = SHELL_MUTATION.exec(body);
+  return m ? m.index + m[0].length - m[1]!.length : -1;
+}
+// Index of the first match not negated within its clause ("do not edit the files") and not inside
+// quotation marks on its line (an example of what someone says: '"Fix this bug" → …'), or -1.
 function intentAt(text: string, re: RegExp): number {
   for (const m of text.matchAll(new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g'))) {
     const start = Math.max(text.lastIndexOf('.', m.index), text.lastIndexOf(';', m.index), text.lastIndexOf('\n', m.index), text.lastIndexOf('—', m.index)) + 1;
-    if (!/\b(?:no|not|never|without|cannot|nothing|\w+n't)\b/i.test(text.slice(start, m.index + m[0].length))) return m.index;
+    if (/\b(?:no|not|never|without|cannot|nothing|\w+n't)\b/i.test(text.slice(start, m.index + m[0].length))) continue;
+    const before = text.slice(text.lastIndexOf('\n', m.index) + 1, m.index);
+    if ((before.match(/"/g) ?? []).length % 2 === 1 || (before.match(/“/g) ?? []).length > (before.match(/”/g) ?? []).length) continue;
+    // a question about the work ("Did agents edit the same code?") is not a request to do it
+    const rest = text.slice(m.index, (text.indexOf('\n', m.index) + 1 || text.length + 1) - 1);
+    if (/^[^.!]*\?/.test(rest)) continue;
+    return m.index;
   }
   return -1;
 }
@@ -117,7 +134,14 @@ export function enforcementFor(a: Artifact, h: HarnessCaps): string {
 const ownBody = (a: Artifact) => a.body.replace(/^[ \t]*(?:[-*]|\d+\.)?[ \t]*(?:\*\*)?`\/[\w:-]+`.*$/gm, '');
 // Does the artifact read outside content (a ticket, an issue, a web page)? The same test the
 // privilege rules use as evidence; the report counts it as a capability.
-export const readsOutsideContent = (a: Artifact) => ownBody(a).search(EXTERNAL_INPUT) >= 0;
+export const readsOutsideContent = (a: Artifact) => blankFences(ownBody(a)).search(EXTERNAL_INPUT) >= 0;
+// Does the text ask for changes (an edit verb aimed at code or files, a shell command that changes
+// something, dynamic context)? The same test the privilege rules use; the report shows it.
+export function asksForChanges(a: Artifact): boolean {
+  const prose = `${a.description ?? ''}\n${blankFences(ownBody(a))}`;
+  if (prose.search(NO_CHANGE_CLAIM) < 0 && intentAt(prose.replace(/\bClaude Code\b/g, 'Claude'.padEnd(11)), EDIT_INTENT) >= 0) return true;
+  return shellMutationAt(a.body) >= 0 || DYNAMIC_CONTEXT.test(a.body);
+}
 
 export function lintArtifact(a: Artifact, o: LintOptions): Diagnostic[] {
   const out: Diagnostic[] = [...a.fm.diagnostics];
@@ -135,7 +159,7 @@ export function lintArtifact(a: Artifact, o: LintOptions): Diagnostic[] {
   // chain a missing allowlist leaves open; either alone is a weaker case; neither is hygiene.
   // A router that describes OTHER skills ("- **`/handoff`** writes a markdown file") is not
   // asking for that itself: lines led by a slash-command reference are someone else's job.
-  const own = ownBody(a);
+  const own = blankFences(ownBody(a));
   const prose = `${a.description ?? ''}\n${own}`;
   // an explicit "changes nothing" / "report only" from the author outweighs a stray edit verb in a
   // proposal ("propose fixes that delete code"); a shell that mutates or dynamic context does not
@@ -154,7 +178,7 @@ export function lintArtifact(a: Artifact, o: LintOptions): Diagnostic[] {
   const noChangeAt = prose.search(NO_CHANGE_CLAIM);
   const saysNoChange = noChangeAt >= 0;
   const editAt = saysNoChange ? -1 : intentAt(prose.replace(/\bClaude Code\b/g, 'Claude'.padEnd(11)), EDIT_INTENT);
-  const shellAt = a.body.search(SHELL_MUTATION), dynAt = a.body.search(DYNAMIC_CONTEXT);
+  const shellAt = shellMutationAt(a.body), dynAt = a.body.search(DYNAMIC_CONTEXT);
   const asksToMutate = editAt >= 0 || shellAt >= 0 || dynAt >= 0;
   const untrustedAt = own.search(EXTERNAL_INPUT);   // an index into `own`: map it through prose (desc + \n + own), which keeps the body's lines
   const takesUntrusted = untrustedAt >= 0;
@@ -178,19 +202,18 @@ export function lintArtifact(a: Artifact, o: LintOptions): Diagnostic[] {
     out.push(d(a, 'description-too-long', a.description.length > cap * 1.5 ? 'medium' : 'low', `description is ${a.description.length} chars (budget ${cap}); it is paid in EVERY session — keep the routing sentence, move the method into the body`, { line: a.fm.lines.description, precedent: 'T1' }));
 
   // ---- allowlist presence / semantics -------------------------------------------------
-  if (list === null) {
+  // A skill's allowed-tools restricts nothing on any harness (Claude Code pre-approves the listed
+  // tools; elsewhere the list is text), so a skill without one simply runs with the session's
+  // permissions. The risk of a skill is its auto-invocation and what its text asks for: see
+  // model-invocable-writer and untrusted-content-rule. A subagent's tools: does restrict.
+  if (list === null && a.kind === 'agent') {
     const why = asksToMutate && takesUntrusted ? ' — it reads untrusted content and asks for changes or a shell, so injected text can act with every tool'
       : asksToMutate ? ' — its text asks for changes or a shell; nothing narrows what it may touch'
       : ' — its text reads or reports only, so this is least-privilege hygiene';
-    // one finding for one problem: with no allowlist, "the model may also start it on its own" is
-    // part of this finding (and its mechanical mitigation), not a second one
-    const auto = a.kind === 'skill' && a.modelInvocable && asksToMutate;
     out.push(d(a, 'no-allowlist', asksToMutate && takesUntrusted ? 'high' : asksToMutate ? 'medium' : 'low',
-      (a.kind === 'skill'
-        ? 'no `allowed-tools` — on Claude Code the skill runs with the session\'s full toolset (Write, Edit, Agent, web, every MCP tool)'
-        : 'no `tools:` — the agent inherits every tool of the parent session') + why + (auto ? '; the model may also start it on its own' : ''),
-      { precedent: 'S1', evidence: [mutateEv, untrustedEv], ...(auto && a.kind === 'skill' && a.userInvocable ? { autofix: { op: 'set', key: 'disable-model-invocation', value: true, label: 'Set disable-model-invocation: true (until it has an allowlist)', safety: 'review' } as Autofix, line: a.fm.lines.name } : {}) }));
-  } else {
+      'no `tools:` — the agent inherits every tool of the parent session' + why,
+      { precedent: 'S1', evidence: [mutateEv, untrustedEv] }));
+  } else if (list !== null) {
     for (const t of list) {
       for (const h of o.harnesses) {
         const v = classifyTool(t, o.registry, h.id);
@@ -280,14 +303,13 @@ export function lintArtifact(a: Artifact, o: LintOptions): Diagnostic[] {
     const mutators = [...writers, ...shells.filter((t) => !t.spec)];
     // only when a person can still start it — otherwise the fix would make it unreachable
     const userOnly: Autofix | undefined = a.userInvocable ? { op: 'set', key: 'disable-model-invocation', value: true, label: 'Set disable-model-invocation: true', safety: 'review' } : undefined;
-    // without an allowlist the full toolset alone is the no-allowlist finding; this one needs the
-    // skill to actually ask for changes (or to be granted mutators, or to drive a costly runtime)
-    // with no allowlist this is part of no-allowlist; here: mutators granted, or a costly runtime
-    const autoMutates = list !== null && mutators.length > 0;
+    // with a tool list: writing tools are granted; without one: the text asks for changes (the
+    // skill then uses the session's permissions, but the model decides when it runs)
+    const autoMutates = list !== null ? mutators.length > 0 : asksToMutate;
     if (a.modelInvocable && (autoMutates || (expensiveRole && list !== null)))
       out.push(d(a, 'model-invocable-writer', autoMutates && takesUntrusted ? 'high' : 'medium',
-        `model may invoke this skill on its own (no \`disable-model-invocation: true\`) and it ${mutators.length ? `can mutate (${mutators.map((t) => t.raw).join(', ')})` : 'drives an expensive runtime'}${autoMutates && takesUntrusted ? ' — and it reads untrusted content' : ''}`,
-        { line: a.fm.lines['disable-model-invocation'] ?? a.fm.lines.name, precedent: 'S2', autofix: userOnly, ...(autoMutates ? { evidence: [{ says: `granted ${mutators.map((t) => t.raw).join(', ')}`, found: true, line: listLine }, untrustedEv] } : {}) }));
+        `model may invoke this skill on its own (no \`disable-model-invocation: true\`) and it ${list === null ? (autoMutates ? 'asks for changes' : 'drives an expensive runtime') : mutators.length ? `can mutate (${mutators.map((t) => t.raw).join(', ')})` : 'drives an expensive runtime'}${autoMutates && takesUntrusted ? ' — and it reads untrusted content' : ''}`,
+        { line: a.fm.lines['disable-model-invocation'] ?? a.fm.lines.name, precedent: 'S2', autofix: userOnly, ...(autoMutates ? { evidence: [list === null ? mutateEv : { says: `granted ${mutators.map((t) => t.raw).join(', ')}`, found: true, line: listLine }, untrustedEv] } : {}) }));
     const SUPERVISED = /\b(supervised|owner (?:must|has to) (?:approve|confirm)|never (?:run )?unattended)\b/i;
     if (a.modelInvocable && SUPERVISED.test(a.body))
       out.push(d(a, 'supervised-but-auto', 'medium', 'body demands supervision but the model may invoke the skill autonomously', { precedent: 'S2', line: bodyLine(a, SUPERVISED), autofix: userOnly }));

@@ -201,7 +201,8 @@ test('saut report on a repository URL: Markdown, HTML and JSON from one scan; ex
     assert.equal(j.totals.skills, j.artifacts.filter((a) => a.kind === 'skill').length);
     assert.ok(j.artifacts.every((a) => Array.isArray(a.enforcement) && a.cost));
     assert.deepEqual(j.views.map((v) => v.harness), j.harnesses, 'one view per harness');
-    assert.ok(j.artifacts.every((a) => typeof a.can.shell === 'boolean' && typeof a.startsOnItsOwn === 'boolean'));
+    assert.ok(j.artifacts.every((a) => typeof a.toolList.present === 'boolean' && typeof a.asksForChanges === 'boolean' && typeof a.startsOnItsOwn === 'boolean'));
+    assert.ok(j.views.every((v) => v.capabilities.length > 0));
     assert.equal((await saut(['report', repo.url, '--format', 'pdf'])).code, 2);
   } finally { await repo.cleanup(); await fs.rm(out, { recursive: true, force: true }); }
 });

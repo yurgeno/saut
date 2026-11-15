@@ -8,13 +8,56 @@ const opts = { _: [], catalog: CATALOG };
 let diags;
 test.before(async () => { ({ diagnostics: diags } = await runLint([PACK], opts)); });
 
-test('S1: a skill without allowed-tools — its severity follows what the text asks for (and read-only is not enforced)', () => {
+test('S1: a skill without allowed-tools is not a finding by itself (allowed-tools restricts no skill); the open read-only promise is', () => {
   const ds = diags.filter((x) => x.path.endsWith('fx-noallow/SKILL.md'));
   const c = ds.map((x) => x.code);
-  // "Read-only: this skill NEVER writes" — the missing allowlist is hygiene; the open promise is the finding
-  assert.equal(ds.find((x) => x.code === 'no-allowlist').severity, 'low');
+  assert.ok(!c.includes('no-allowlist'), 'allowed-tools pre-approves on Claude Code and is text elsewhere: adding one narrows nothing');
   assert.ok(!c.includes('model-invocable-writer'), 'nothing in the text asks to change anything');
   assert.ok(c.includes('readonly-not-enforced'));
+});
+
+test('S1/S2 without an allowlist: a model-invocable skill whose text asks for changes is model-invocable-writer; a subagent keeps no-allowlist', async () => {
+  const { lintArtifact } = await import('../lib/lint.mts');
+  const { skillFromText, agentFromText } = await import('../lib/skill.mts');
+  const { loadHarnesses } = await import('../lib/caps.mts');
+  const harnesses = [...(await loadHarnesses()).values()];
+  const o = { harnesses, registry: { servers: {} }, agentsByName: new Map() };
+  const lint = (t, kind = 'skill') => lintArtifact(kind === 'skill' ? skillFromText('/x/skills/s/SKILL.md', t) : agentFromText('/x/agents/a.md', t), o);
+  const fm = (body, extra = '') => `---\nname: s\ndescription: Does a thing. Invoke: s.\n${extra}---\n${body}\n`;
+  const hi = lint(fm('Fetch the jira ticket and fix the code it names.'));
+  const w = hi.find((x) => x.code === 'model-invocable-writer');
+  assert.equal(w?.severity, 'high', 'asks for changes and reads a ticket');
+  assert.equal(w.autofix?.key, 'disable-model-invocation');
+  assert.ok(!hi.some((x) => x.code === 'no-allowlist'));
+  assert.equal(lint(fm('Fix the failing tests.')).find((x) => x.code === 'model-invocable-writer')?.severity, 'medium');
+  assert.ok(!lint(fm('Fetch the jira ticket and fix the code it names.', 'disable-model-invocation: true\n')).some((x) => x.code === 'model-invocable-writer'), 'a person starts it');
+  assert.equal(lint('---\nname: a\ndescription: Fixes code.\n---\nFetch the jira ticket and fix the code it names.\n', 'agent').find((x) => x.code === 'no-allowlist')?.severity, 'high', 'tools: does restrict a subagent');
+});
+
+test('prose heuristics: code blocks are examples, a match stays on its line, shell evidence quotes the command', async () => {
+  const { lintArtifact } = await import('../lib/lint.mts');
+  const { skillFromText } = await import('../lib/skill.mts');
+  const { loadHarnesses } = await import('../lib/caps.mts');
+  const o = { harnesses: [...(await loadHarnesses()).values()], registry: { servers: {} }, agentsByName: new Map() };
+  const lint = (body) => lintArtifact(skillFromText('/x/skills/s/SKILL.md', `---\nname: s\ndescription: Reviews feedback. Invoke: s.\n---\n${body}\n`), o);
+  // receiving-code-review (obra/superpowers): a quoted reviewer line inside a fence is not a request
+  assert.ok(!lint('## Examples\n\n```\nReviewer: "Remove legacy code"\n```\n\nCheck each comment before you answer.').some((x) => x.code === 'model-invocable-writer'));
+  // triage (mattpocock/skills): a heading and the next paragraph are not one sentence
+  assert.ok(!lint('# Triage\n\nMove issues through a small state machine.').some((x) => x.code === 'untrusted-content-rule'));
+  assert.ok(lint('Triage the issues on the tracker.').some((x) => x.code === 'untrusted-content-rule'), 'on one line it still reads issues');
+  for (const [body, why] of [
+    ['**Too broad:** "Fix all the tests" - the agent gets lost.', 'a quoted example of what someone says'],
+    ['Check for conflicts. Did agents edit the same code?', 'a question'],
+    ['A careless run re-implements tasks that already exist.', 'a word after a hyphen'],
+    ['Use when implementing major features.', 'a descriptive -ing form'],
+    ['Run the full suite and verify all fixes work together.', '"fixes" is a noun here'],
+    ['Assume they write idiomatic code in the project language.', 'what other people do'],
+    ['Find the base:\n\n```bash\ngit merge-base origin/main HEAD\n```', 'git merge-base only reads'],
+  ]) assert.ok(!lint(body).some((x) => x.code === 'model-invocable-writer'), why);
+  const ds = lint('Ship it:\n\n```bash\nnpm test\ngit push origin main\n```');
+  const ev = ds.find((x) => x.code === 'model-invocable-writer').evidence[0];
+  assert.match(ev.says, /shell command/);
+  assert.equal(ev.quote, 'git push origin main');
 });
 
 test('S2: a model-invocable writer / supervised skill', () => {

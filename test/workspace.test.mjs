@@ -156,18 +156,18 @@ test('security at a glance: one line per rule and severity — the worst case ne
     await skill('token', 'Fix the bug and rewrite the failing tests. Uses a read-only Jira token.');
     await skill('routed', '- **`/notes`** writes a markdown file.\n- **`/x`** helps.\n\nRead the jira ticket. Report.');
     const r = await buildReport([dir], { _: [] });
-    const rule = r.security.filter((s) => s.code === 'no-allowlist');
+    const rule = r.security.filter((s) => s.code === 'model-invocable-writer');
     assert.equal(rule.length, 1, 'one line per rule');
-    assert.deepEqual(rule[0].groups, [{ severity: 'high', artifacts: ['reads-tickets'] }, { severity: 'medium', artifacts: ['splits', 'token'] }, { severity: 'low', artifacts: ['reports', 'reports-too', 'routed', 'router', 'smells'] }],
+    assert.deepEqual(rule[0].groups, [{ severity: 'high', artifacts: ['reads-tickets'] }, { severity: 'medium', artifacts: ['splits', 'token'] }],
       'writing tickets is not reading them; a router describing other skills and a code-smell catalog ask for nothing');
-    assert.ok(!r.security.some((s) => s.code === 'model-invocable-writer'), 'with no allowlist, auto-invocation is part of no-allowlist, not a second finding');
+    assert.ok(!r.security.some((s) => s.code === 'no-allowlist'), 'a skill without allowed-tools is not a finding: the list restricts no skill');
     // the severity shows its grounds: the lines read, and what was looked for and not found
-    const ev = (name) => r.artifacts.find((a) => a.label === name).findings.find((f) => f.code === 'no-allowlist').evidence;
+    const ev = (name, code = 'model-invocable-writer') => r.artifacts.find((a) => a.label === name).findings.find((f) => f.code === code).evidence;
     assert.deepEqual(ev('reads-tickets').map((e) => [e.found, e.line]), [[true, 5], [true, 5]]);
     assert.match(ev('reads-tickets')[1].quote, /Fetch the jira ticket/);
     assert.deepEqual(ev('splits').map((e) => e.found), [true, false], 'medium: asks for changes, reads nothing from outside');
-    assert.match(ev('reports')[0].says, /author says it changes nothing/);
-    assert.deepEqual([ev('routed')[1].line, ev('routed')[1].quote], [8, 'Read the jira ticket. Report.'], 'evidence after blanked router lines points at the real line');
+    assert.ok(!r.artifacts.find((a) => a.label === 'reports').findings.some((f) => f.code === 'model-invocable-writer'), 'the author says it changes nothing');
+    assert.deepEqual([ev('routed', 'untrusted-content-rule')[0].line, ev('routed', 'untrusted-content-rule')[0].quote], [8, 'Read the jira ticket. Report.'], 'evidence after blanked router lines points at the real line');
     assert.match(toMarkdown(r), /^- `skills\/reads-tickets\/SKILL\.md`, line 5: asks for changes\n  > Fetch the jira ticket/m, 'evidence as a list, the file relative to the scanned folder');
     const cli = await saut(['lint', dir]);
     assert.match(cli.stdout, /\+ reads outside content .* — line 5: "Fetch the jira ticket/);
@@ -197,7 +197,9 @@ test('report views: one scan filtered per harness; harness-only findings stay on
     const only = (id) => all.filter((f) => f.severity === 'medium' && f.harness && f.harness.split(',').includes(id)).length;
     assert.equal(view('claude-code').counts.medium - view('codex').counts.medium, only('claude-code') - only('codex'), 'harness-tagged findings count on their harness only');
     assert.ok(only('claude-code') >= bash.length);
-    assert.equal(r.artifacts.find((a) => a.label === 'look').can.shell, true);
+    assert.deepEqual(r.artifacts.find((a) => a.label === 'look').toolList, { present: true, shell: true, edit: false, mcp: false });
+    assert.ok(view('claude-code').capabilities.some((c) => c.label === 'Approve shell commands in advance' && c.value === '1 of 1 skill'));
+    assert.ok(view('codex').capabilities.some((c) => c.label === 'Skill tool lists' && c.value === 'advice only'));
     assert.equal(r.artifacts.find((a) => a.label === 'look').startsOnItsOwn, false);
     const md = toMarkdown(r, 'copilot');
     assert.match(md, /^GitHub Copilot.* does not load `scout`/m);

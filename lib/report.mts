@@ -6,7 +6,7 @@
 import path from 'node:path';
 import { runCost, runLint, VERSION, type Opts } from './commands.mts';
 import { guidanceStatus } from './guidance.mts';
-import { matrix, readsOutsideContent } from './lint.mts';
+import { asksForChanges, matrix, readsOutsideContent } from './lint.mts';
 import { ruleInfo } from './rules.mts';
 import { active } from './suppress.mts';
 import type { Diagnostic } from './types.mts';
@@ -24,11 +24,14 @@ const SEV = ['high', 'medium', 'low', 'info'] as const;
 
 export interface ReportFinding { code: string; category: string | null; title: string | null; severity: string; line: number | null; harness: string | null; message: string; fix: string | null; why: string | null; doc: string | null; heuristic: boolean; guidance: { class: string; verifiedAt: string; sources: string[] } | null; autofix: string | null; suppressed: string | null; file: string | null; in: string[] | null; evidence: { says: string; found: boolean; line: number | null; quote: string | null }[] | null }
 export interface ReportArtifact { kind: string; name: string; label: string; path: string; copies: string[]; identical: boolean; description: string; counts: Record<string, number>; enforcement: { harness: string; allowlist: string }[]; cost: { alwaysOnTokens: number; invokeTokens: number; transitiveTokens: number; over: string[] } | null; findings: ReportFinding[];
-  // what the allowlist lets it do (everything = no allowlist), whether the model may start it, whether it reads outside content
-  can: { shell: boolean; edit: boolean; mcp: boolean; everything: boolean }; startsOnItsOwn: boolean; readsOutside: boolean }
+  // its tool list (present: false = none, so it runs with the session's permissions), whether the
+  // model may start it, whether its text asks for changes, whether it reads outside content
+  toolList: { present: boolean; shell: boolean; edit: boolean; mcp: boolean }; startsOnItsOwn: boolean; asksForChanges: boolean; readsOutside: boolean }
+// One line of "what the agent setup can do" for a harness: what differs from a plain session there.
+export interface Capability { label: string; value: string; tone: 'risk' | 'caution' | 'ok' }
 // The report for one harness: the findings that apply there (a finding with `harness` applies only
 // to those), without the artifacts it does not load. One scan, filtered: never a separate lint.
-export interface ReportView { harness: string; title: string; counts: { high: number; medium: number; low: number; info: number }; artifacts: number; notLoaded: string[]; alwaysOnTokens: number; invokeTokens: number }
+export interface ReportView { harness: string; title: string; skillAllowlist: string; agentAllowlist: string; counts: { high: number; medium: number; low: number; info: number }; artifacts: number; notLoaded: string[]; alwaysOnTokens: number; invokeTokens: number; capabilities: Capability[] }
 export interface ReportWorkspaceUnit { kind: string; label: string; paths: string[]; identical: boolean; counts: Record<string, number>; findings: ReportFinding[] }
 export interface ReportWorkspace {
   files: number; byKind: Record<string, number>;
@@ -71,9 +74,42 @@ const countsOf = (fs: UnitFinding[]) => {
   return Object.fromEntries([...SEV.map((s) => [s, on.filter((x) => x.severity === s).length]), ['security', on.filter(isSecurity).length], ['suppressed', fs.length - on.length]]);
 };
 const WRITERS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
-const canOf = (list: { base: string }[] | null) => list === null
-  ? { shell: true, edit: true, mcp: true, everything: true }
-  : { shell: list.some((t) => t.base === 'Bash' || t.base === 'PowerShell'), edit: list.some((t) => WRITERS.has(t.base)), mcp: list.some((t) => t.base.startsWith('mcp__')), everything: false };
+const toolListOf = (list: { base: string }[] | null) => list === null
+  ? { present: false, shell: false, edit: false, mcp: false }
+  : { present: true, shell: list.some((t) => t.base === 'Bash' || t.base === 'PowerShell'), edit: list.some((t) => WRITERS.has(t.base)), mcp: list.some((t) => t.base.startsWith('mcp__')) };
+
+// What the agent setup can do on one harness, as a difference from a plain session there: a skill
+// without a tool list runs with the session's permissions like the session itself, so it adds
+// nothing; what adds risk is a skill the model starts on its own that asks for changes, outside
+// content coming in, tools approved in advance, and what holds a subagent to its list.
+function capabilitiesFor(h: { toolAllowlist: string; agentAllowlist: string }, loaded: ReportArtifact[], w: ReportWorkspace): Capability[] {
+  const skills = loaded.filter((a) => a.kind === 'skill'), agents = loaded.filter((a) => a.kind === 'agent');
+  const of = (n: number, all: number, noun: string) => `${n} of ${all} ${all === 1 ? noun : noun + 's'}`;
+  const out: Capability[] = [];
+  if (skills.length) {
+    const auto = skills.filter((a) => a.startsOnItsOwn && a.asksForChanges).length;
+    out.push({ label: 'Start without being asked and ask for changes', value: of(auto, skills.length, 'skill'), tone: auto ? 'risk' : 'ok' });
+  }
+  if (loaded.length) {
+    const outside = loaded.filter((a) => a.readsOutside).length;
+    out.push({ label: 'Read outside content such as tickets or web pages', value: `${outside} of ${loaded.length}`, tone: outside ? 'caution' : 'ok' });
+  }
+  if (skills.length && h.toolAllowlist === 'grant') {
+    const sh = skills.filter((a) => a.toolList.shell).length, ed = skills.filter((a) => a.toolList.edit).length;
+    out.push({ label: 'Approve shell commands in advance', value: of(sh, skills.length, 'skill'), tone: sh ? 'caution' : 'ok' });
+    out.push({ label: 'Approve file edits in advance', value: of(ed, skills.length, 'skill'), tone: ed ? 'caution' : 'ok' });
+  } else if (skills.length) out.push({ label: 'Skill tool lists', value: h.toolAllowlist === 'n/a' ? 'not loaded' : 'advice only', tone: 'ok' });
+  if (agents.length) {
+    const listed = agents.filter((a) => a.toolList.present).length;
+    if (h.agentAllowlist === 'restrict') out.push({ label: 'Subagents held to a tool list', value: of(listed, agents.length, 'subagent'), tone: listed === agents.length ? 'ok' : 'caution' });
+    else if (h.agentAllowlist === 'dropped') out.push({ label: 'Subagent tool lists', value: 'ignored', tone: 'caution' });
+    else if (h.agentAllowlist === 'prose') out.push({ label: 'Subagent tool lists', value: 'advice only', tone: 'caution' });
+  }
+  out.push(w.hooks.length || w.mcp.length
+    ? { label: 'Hooks and MCP servers', value: `${w.hooks.length} ${w.hooks.length === 1 ? 'hook' : 'hooks'}, ${w.mcp.length} ${w.mcp.length === 1 ? 'server' : 'servers'}`, tone: 'caution' }
+    : { label: 'Hooks and MCP servers', value: 'none', tone: 'ok' });
+  return out;
+}
 const CAN: [keyof NonNullable<Surface['caps']>, string][] = [['network', 'network'], ['subprocess', 'runs processes'], ['background', 'background process'], ['readsInput', 'reads hook input'], ['credentials', 'credentials'], ['dynamicCode', 'dynamic code']];
 
 // The agent workspace as one block — the same in the report and in the Studio: what loads into
@@ -114,8 +150,9 @@ export async function buildReport(targets: string[], opts: Opts): Promise<Report
       enforcement: matrix(a, lint.harnesses).map((m) => ({ harness: m.harness, allowlist: m.allowlist })),
       cost: l ? { alwaysOnTokens: l.line.alwaysOnTokens, invokeTokens: l.line.invokeTokens, transitiveTokens: l.line.transitive.reduce((n, t) => n + t.tokens, 0), over: l.over } : null,
       findings: u.findings.map((f) => finding(f.d, u, f)),
-      can: canOf(a.kind === 'skill' ? a.allowedTools : a.tools),
+      toolList: toolListOf(a.kind === 'skill' ? a.allowedTools : a.tools),
       startsOnItsOwn: a.kind === 'skill' && a.modelInvocable,
+      asksForChanges: asksForChanges(a),
       readsOutside: readsOutsideContent(a),
     };
   }).sort((p, q) => (q.counts.high - p.counts.high) || (q.counts.medium - p.counts.medium) || p.name.localeCompare(q.name));
@@ -129,7 +166,9 @@ export async function buildReport(targets: string[], opts: Opts): Promise<Report
     const fs = [...loaded.flatMap((a) => a.findings), ...workspace.units.flatMap((u) => u.findings), ...otherFindings].filter(applies);
     const k = (s: string) => fs.filter((f) => f.severity === s).length;
     return {
-      harness: h.id, title: h.title, counts: { high: k('high'), medium: k('medium'), low: k('low'), info: k('info') },
+      harness: h.id, title: h.title, skillAllowlist: h.toolAllowlist, agentAllowlist: h.agentAllowlist,
+      counts: { high: k('high'), medium: k('medium'), low: k('low'), info: k('info') },
+      capabilities: capabilitiesFor(h, loaded, workspace),
       artifacts: loaded.length, notLoaded: notLoaded.map((a) => a.label),
       alwaysOnTokens: loaded.reduce((n, a) => n + (a.cost?.alwaysOnTokens ?? 0), 0) + workspace.instructions.reduce((n, i) => n + (i.tokens ?? 0), 0),
       invokeTokens: loaded.reduce((n, a) => n + (a.cost?.invokeTokens ?? 0), 0),
@@ -266,23 +305,8 @@ export function toMarkdown(r: Report, viewId: string = defaultView(r)): string {
   const total = c.high + c.medium + c.low + c.info;
   out.push(total ? `**${countsText(c)}${c.info ? `, ${plural(c.info, 'note')}` : ''}.** ${c.high ? 'Fix the high findings first.' : c.medium ? 'No high findings.' : 'Only small suggestions.'}` : '**Nothing to fix.**');
   if (r.totals.suppressed) out.push('', `${plural(r.totals.suppressed, 'finding is', 'findings are')} suppressed in \`saut.json\` and not counted.`);
-  const n = loaded.length;
-  const cap = (p: (a: ReportArtifact) => boolean) => loaded.filter(p).length;
-  const lines: string[] = [];
-  if (n) {
-    lines.push(`- Run shell commands: ${cap((a) => a.can.shell)} of ${n}`);
-    lines.push(`- Write or edit files: ${cap((a) => a.can.edit)} of ${n}`);
-    if (cap((a) => a.can.mcp)) lines.push(`- Use MCP tools: ${cap((a) => a.can.mcp)} of ${n}`);
-    if (cap((a) => a.can.everything)) lines.push(`- Have no tool list, so every tool is available: ${cap((a) => a.can.everything)} of ${n}`);
-    const auto = cap((a) => a.startsOnItsOwn && (a.can.shell || a.can.edit));
-    if (auto) lines.push(`- Start without being asked and can change things: ${plural(auto, 'skill')}`);
-    if (cap((a) => a.readsOutside)) lines.push(`- Read outside content such as tickets or web pages: ${cap((a) => a.readsOutside)} of ${n}`);
-  }
   const w = r.workspace;
-  lines.push(w.hooks.length || w.mcp.length
-    ? `- Hooks: ${w.hooks.length}. MCP servers: ${w.mcp.length}.`
-    : '- Hooks and MCP servers: none found');
-  out.push('', 'What the agent setup can do:', '', ...lines);
+  out.push('', `What the agent setup adds to a plain ${view.title} session:`, '', ...view.capabilities.map((x) => `- ${x.label}: ${x.value}`));
   out.push('', `Token cost: ${fmtNum(view.alwaysOnTokens)} tokens in every session for descriptions${r.totals.instructionTokens ? ' and instruction files' : ''}, up to ${fmtNum(view.invokeTokens)} more when all of them run.`);
   const over = loaded.filter((a) => a.cost?.over.length);
   if (over.length) out.push('', `Over budget: ${over.map((a) => `\`${a.label}\` (${a.cost!.over.join('; ')})`).join(', ')}.`);
@@ -339,11 +363,11 @@ export function toMarkdown(r: Report, viewId: string = defaultView(r)): string {
   // ---- files ----
   out.push('', '## Files checked', '');
   if (r.artifacts.length) {
-    out.push('| File | Can | Findings |', '|---|---|---|');
+    out.push('| File | Tool list | Findings |', '|---|---|---|');
     for (const a of r.artifacts) {
       const url = link(a.path, null);
       const nm = `${url ? `[${cell(a.label)}](${url})` : `\`${cell(a.label)}\``} (${a.kind === 'agent' ? 'subagent' : a.kind})`;
-      const can = a.can.everything ? 'every tool' : [a.can.shell ? 'Shell' : null, a.can.edit ? 'edit files' : null, a.can.mcp ? 'MCP tools' : null].filter(Boolean).join(', ') || 'read only';
+      const can = !a.toolList.present ? 'none, session permissions' : [a.toolList.shell ? 'Shell' : null, a.toolList.edit ? 'edit files' : null, a.toolList.mcp ? 'MCP tools' : null].filter(Boolean).join(', ') || 'read only';
       const mine = a.findings.filter(inView);
       const cnt = Object.fromEntries(SEVS.map((s) => [s, mine.filter((f) => f.severity === s).length]));
       out.push(`| ${nm} | ${view.notLoaded.includes(a.label) ? 'not loaded' : can} | ${view.notLoaded.includes(a.label) ? '' : countsText(cnt, SEVS)} |`);

@@ -5,6 +5,44 @@ versions are [semantic](https://semver.org/) and each release is tagged.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-15
+
+The rules were recalibrated after a review of the reports for obra/superpowers and
+mattpocock/skills. On both, every skill was flagged, the top finding was "No tool allowlist", and
+some evidence quoted example dialogue or the opening of a code block.
+
+### Changed
+
+- **A skill without `allowed-tools` is no longer a finding.** On Claude Code `allowed-tools`
+  approves tools in advance and restricts nothing; on the other harnesses it is text. A skill
+  without it runs with the session's permissions, and the old fix (add the list) only removed
+  prompts. `no-allowlist` now applies to subagents, whose `tools:` does restrict on Claude Code.
+- **`model-invocable-writer` covers skills without a tool list.** When the model may start a skill
+  on its own and its text asks for changes, it is medium; with untrusted input it is high. The fix
+  is `disable-model-invocation: true`, or a reading and a writing skill and a "data, not
+  instructions" line.
+- **Text heuristics read only the author's own requests.** They skip fenced code blocks, quoted
+  examples of what someone says, questions, descriptive verb forms ("implementing",
+  "re-implements") and nouns ("all fixes"), and a match no longer runs across a line break (a
+  heading and the next paragraph). `git merge-base` no longer counts as a command that changes
+  something. Evidence for a shell command quotes the command line, not the line that opens the
+  code block.
+- **The report's capability list shows what differs from a plain session** on the chosen harness:
+  skills the model starts on its own that ask for changes, outside content, tools approved in
+  advance (Claude Code), and whether subagents are held to their tool lists. "Run shell commands
+  15 of 15" described any session and is gone. The file table shows each tool list, or "none,
+  session permissions".
+- Report JSON: on each artifact `toolList` (`present`, `shell`, `edit`, `mcp`) and `asksForChanges`
+  replace `can`; each view has `capabilities`, `skillAllowlist` and `agentAllowlist`.
+
+Checked against ~230 artifacts and ~170 workspace files (installed plugins and marketplaces,
+`~/.claude/skills`, the TAUT engine and packs, the test fixtures, superpowers, mattpocock/skills):
+findings went from 491 to 394. Every difference is one of the classes above; subagent
+`no-allowlist` findings are unchanged apart from three descriptive phrases no longer read as
+requests.
+
+[0.10.0]: https://github.com/yurgeno/saut/releases/tag/v0.10.0
+
 ## [0.9.1] - 2026-11-15
 
 ### Fixed

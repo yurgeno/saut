@@ -15,10 +15,18 @@ plus a request to change files, with nothing restricting tools), or a skill a st
 *medium*: a real risk that needs one more condition, or a feature that silently stops working.
 *low*: least-privilege and cost hygiene. *info*: worth knowing, with nothing to fix.
 
-Privilege rules read the text for **evidence**. A missing allowlist on a skill that only reads and
-reports is hygiene (low). On a skill whose text asks to edit files or run a mutating command it is
-medium, and with untrusted input as well it is high. An explicit "changes nothing" or "report only"
-from the author counts as evidence that the skill does not intend to change anything.
+Privilege rules read the text for **evidence**. A skill the model may start on its own is medium
+when its text asks to edit files or run a command that changes something, and high when it also
+reads untrusted input. A subagent without a tool list follows the same scale (low when it only reads
+and reports). An explicit "changes nothing" or "report only" from the author counts as evidence that
+it does not intend to change anything. The text heuristics skip fenced code blocks, quoted examples
+of what someone says, questions, and descriptive verb forms ("implementing", "re-implements"), and a
+match never runs across a line break. Evidence for a shell command quotes the command line itself.
+
+A skill without `allowed-tools` is **not** a finding by itself. On Claude Code `allowed-tools`
+approves the listed tools in advance and leaves every other tool behind the usual permission
+prompt; on the other harnesses it is text the model may follow. A skill without the list therefore
+runs with the session's permissions, and adding one would only remove prompts.
 
 **Why this severity.** Whether a key is present is a fact. The severity of a rule that reads prose
 is an estimate of intent, and the estimate can be wrong. So each such finding (`no-allowlist`,
@@ -47,8 +55,8 @@ would act with.
 
 | rule | severity | fires when | precedent |
 |---|---|---|---|
-| `no-allowlist` | high / medium / low | there is no `allowed-tools` (skill) or `tools:` (agent), so the full toolset is available. high: the text asks to edit files or run a mutating command *and* reads untrusted content; medium: it asks to change things; low: it only reads and reports. When the model may also start such a skill, the message says so and the mechanical fix sets `disable-model-invocation: true`, so this is reported as a single finding | S1 |
-| `model-invocable-writer` | high / medium | `disable-model-invocation` is not `true` and the allowlist grants mutators (Write/Edit/bare Bash/writing MCP tools), or the skill drives an expensive runtime. high when it also reads untrusted content. With no allowlist at all, `no-allowlist` covers this | S2, S10 |
+| `no-allowlist` | high / medium / low | a subagent has no `tools:`, so it inherits the full toolset of the session that starts it. high: the text asks to edit files or run a mutating command *and* reads untrusted content; medium: it asks to change things; low: it only reads and reports. Skills are not checked (see above) | S1 |
+| `model-invocable-writer` | high / medium | `disable-model-invocation` is not `true` and the skill can change things: its tool list grants mutators (Write/Edit/bare Bash/writing MCP tools), or, with no tool list, its text asks for changes; or it drives an expensive runtime. high when it also reads untrusted content | S2, S10 |
 | `supervised-but-auto` | medium | the body demands supervision ("SUPERVISED, always", "never unattended") but the model may invoke the skill | S2 |
 | `unreachable` | high | `user-invocable: false` and `disable-model-invocation: true` | none |
 | `dead-privilege` | low | a granted tool that the body or description never evidences. Evidence for an MCP tool is its name, the server or the tool's first word, a catalog role word such as "the tracker MCP", a templated `mcp__<serverKey>__…`, or "the tools listed in the frontmatter". Evidence for a builtin is prose: shell commands, or running build/test commands, verification, a suite, a test/build check or gates, for Bash; "spawn the subagent" for Agent, and so on. Read/Glob/Grep/Skill/AskUserQuestion are ambient and never dead; scoped rules (`Bash(git diff *)`) are deliberate and skipped | S4 |

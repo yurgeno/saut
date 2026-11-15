@@ -157,7 +157,7 @@ test('GET /api/artifact: passport with findings, cost and matrix; traversal is r
   const p = path.join(root, 'skills', 'fx-noallow', 'SKILL.md');
   const j = await (await get('/api/artifact?path=' + encodeURIComponent(p))).json();
   assert.equal(j.name, 'fx-noallow');
-  assert.ok(j.findings.some((f) => f.code === 'no-allowlist'));
+  assert.ok(j.findings.some((f) => f.code === 'readonly-not-enforced'));
   assert.ok(j.cost.alwaysOnTokens > 0);
   assert.ok(j.matrix.some((m) => m.harness === 'codex' && m.allowlist === 'prose'));
   assert.ok(j.text.startsWith('---'));

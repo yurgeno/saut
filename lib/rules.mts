@@ -22,14 +22,14 @@ export const RULES: Record<string, RuleInfo> = {
   // (Overview column, Security card, the skill's panel, the report): the full toolset is what an
   // injection acts with, and one word must mean one set of findings on every screen.
   'no-allowlist': {
-    category: 'security', section: 'privileges', title: 'No tool allowlist',
-    why: 'Without an allowlist the artifact runs with every tool of the session (writes, web, every MCP server), whatever its body says it does.',
-    fix: 'Declare the tools the body actually uses: `allowed-tools` for a skill, `tools` for an agent. Start from Read, Glob, Grep and add only what a step needs.',
+    category: 'security', section: 'privileges', title: 'Subagent without a tool list',
+    why: 'A subagent without `tools:` inherits every tool of the session that starts it (writes, web, every MCP server), whatever its text says it does. On Claude Code a tool list holds a subagent to those tools. A skill is not checked by this rule: its `allowed-tools` restricts nothing on any harness.',
+    fix: 'Declare the tools the body actually uses in `tools:`. Start from Read, Glob, Grep and add only what a step needs.',
   },
   'model-invocable-writer': {
     category: 'security', section: 'privileges', title: 'Model can invoke a writing skill on its own',
-    why: 'The model may fire this skill without being asked, and the skill can change files or drive an expensive runtime.',
-    fix: 'Set `disable-model-invocation: true` so only a person starts it with /name. If it must stay model-invocable, drop the writing tools or scope Bash to read-only verbs.',
+    why: 'The model may start this skill without being asked, and the skill changes files, runs a command that changes something, or drives an expensive runtime. Read with outside content, text written by someone else can then decide when it runs.',
+    fix: 'Set `disable-model-invocation: true` so only a person starts it with /name. If it must stay model-invocable, split it into a skill that reads and one that writes, and state that fetched content is data, never instructions.',
   },
   'supervised-but-auto': {
     category: 'privileges', title: 'Supervised skill is model-invocable', heuristic: true,
